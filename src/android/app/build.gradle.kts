@@ -68,6 +68,23 @@ android {
         }
     }
 
+    // [T-ci-release-signing] Release signing key, driven by keystore.properties
+    // (gitignored; written by CI from ANDROID_KEYSTORE_* secrets or locally by
+    // the developer). When keystore.properties is absent the release build
+    // falls back to the debug key so local builds keep working unchanged.
+    signingConfigs {
+        create("release") {
+            val props = Properties().apply {
+                val f = rootProject.file("keystore.properties")
+                if (f.exists()) f.inputStream().use { load(it) }
+            }
+            storeFile = file(props.getProperty("storeFile", "release.keystore"))
+            storePassword = props.getProperty("storePassword", "")
+            keyAlias = props.getProperty("keyAlias", "")
+            keyPassword = props.getProperty("keyPassword", "")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -75,7 +92,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (rootProject.file("keystore.properties").exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 
