@@ -78,7 +78,7 @@ android {
                 val f = rootProject.file("keystore.properties")
                 if (f.exists()) f.inputStream().use { load(it) }
             }
-            storeFile = file(props.getProperty("storeFile", "release.keystore"))
+            storeFile = rootProject.file(props.getProperty("storeFile", "release.keystore"))
             storePassword = props.getProperty("storePassword", "")
             keyAlias = props.getProperty("keyAlias", "")
             keyPassword = props.getProperty("keyPassword", "")
