@@ -127,8 +127,9 @@ struct LLMModel: Equatable, Hashable, Identifiable, Sendable, Codable {
     // model catalog: modern Opus/Sonnet 4.x & 5 and Fable 5 are 1M context;
     // Haiku 4.5 is 200K. Output: 128K (Opus/Fable), 64K (Sonnet/Haiku). Set
     // explicitly so the values don't depend on the id heuristic (which also
-    // now defaults modern Claude to 1M as a backstop). models.dev enrich can
-    // still override at runtime.
+    // now defaults modern Claude to 1M as a backstop). [T-model-metadata-from-api]
+    // models.dev enrich only fills gaps now (fill-if-nil), so these explicit
+    // values win over the catalog at runtime.
     static let claudeFable5 = LLMModel(
         id: "claude-fable-5",
         displayName: "Claude Fable 5",

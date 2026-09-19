@@ -311,18 +311,23 @@ enum ModelsDevAPI {
             result.modalityOverride = devModality
         }
 
-        // Context window: models.dev is the source of truth
-        if let ctx = devModel.limit?.context {
+        // Context window: API/built-in value wins; models.dev only fills gaps.
+        // [T-model-metadata-from-api] Previously models.dev overwrote a value
+        // the /v1/models API already told us (e.g. deepseek/deepseek-flash →
+        // 1M), which made the API-first metadata patch pointless. Fill-if-nil
+        // matches the doc above ("Only fills in fields that are currently
+        // nil/unset") and Android ModelsDevApi.applyDevData.
+        if result.contextWindow == nil, let ctx = devModel.limit?.context {
             result.contextWindow = ctx
         }
 
-        // Max output tokens: models.dev is the source of truth
-        if let out = devModel.limit?.output {
+        // Max output tokens: API/built-in value wins; models.dev only fills gaps.
+        if result.maxOutputTokens == nil, let out = devModel.limit?.output {
             result.maxOutputTokens = out
         }
 
-        // Reasoning capability
-        if let reasoning = devModel.reasoning {
+        // Reasoning capability: API/built-in value wins; models.dev only fills gaps.
+        if result.supportsReasoning == nil, let reasoning = devModel.reasoning {
             result.supportsReasoning = reasoning
         }
 

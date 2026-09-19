@@ -96,13 +96,13 @@ object ModelsDevApi {
         val keys = providerKeyMap[model.provider] ?: emptyList()
         for (key in keys) {
             val prov = registry[key] ?: continue
-            val devModel = prov.models[model.id] ?: continue
+            val devModel = resolveDevModel(prov, model.id) ?: continue
             return applyDevData(model, devModel)
         }
 
         // Fallback: scan all providers for the model ID
         for ((_, prov) in registry) {
-            val devModel = prov.models[model.id] ?: continue
+            val devModel = resolveDevModel(prov, model.id) ?: continue
             return applyDevData(model, devModel)
         }
 
@@ -115,7 +115,7 @@ object ModelsDevApi {
             val keys = providerKeyMap[model.provider] ?: emptyList()
             for (key in keys) {
                 val prov = registry[key] ?: continue
-                val devModel = prov.models[model.id] ?: continue
+                val devModel = resolveDevModel(prov, model.id) ?: continue
                 return@map applyDevData(model, devModel)
             }
             // Fallback scan: the same model id is published by many providers
@@ -129,7 +129,17 @@ object ModelsDevApi {
             // Sort by key for a stable pick and prefer an entry that carries
             // reasoning metadata, so the richer declaration wins over a sparser
             // duplicate. Mirrors iOS ModelsDevAPI.enrichModels.
-            val candidates = registry.keys.sorted().mapNotNull { registry[it]?.models?.get(model.id) }
+            //
+            // [T-model-metadata-from-api] Candidate collection also matches
+            // NORMALIZED ids (vendor prefix stripped, '.'/'_' folded to '-'),
+            // so a relay id like `deepseek/deepseek-flash` finds the catalog
+            // entry `deepseek-flash`. Exact match still wins within a provider;
+            // the sorted + effort-preference selection over candidates is
+            // unchanged.
+            val candidates = registry.keys.sorted().mapNotNull { provKey ->
+                val prov = registry[provKey] ?: return@mapNotNull null
+                resolveDevModel(prov, model.id)
+            }
             val best = candidates.firstOrNull { !it.reasoningEffortValues.isNullOrEmpty() }
                 ?: candidates.firstOrNull()
             if (best != null) return@map applyDevData(model, best)
@@ -140,10 +150,17 @@ object ModelsDevApi {
     // MARK: - Apply models.dev data
 
     private fun applyDevData(model: LLMModel, devModel: ModelDevEntry): LLMModel {
+        // [T-model-metadata-from-api] API/built-in value wins; models.dev only
+        // fills gaps. The /v1/models response (OpenAIModelsApi Task 1) is the
+        // user's primary source, so a value it already set must survive
+        // enrichment — previously `devModel.x ?: model.x` let models.dev
+        // overwrite the API's answer. Mirrors iOS ModelsDevAPI.applyDevData.
+        // Modality/interleaved/effort stay devModel-wins (models.dev is the
+        // only source for those; the API doesn't serve them).
         return model.copy(
-            contextWindow = devModel.contextWindow ?: model.contextWindow,
-            maxOutputTokens = devModel.maxOutputTokens ?: model.maxOutputTokens,
-            supportsReasoning = devModel.reasoning ?: model.supportsReasoning,
+            contextWindow = model.contextWindow ?: devModel.contextWindow,
+            maxOutputTokens = model.maxOutputTokens ?: devModel.maxOutputTokens,
+            supportsReasoning = model.supportsReasoning ?: devModel.reasoning,
             interleavedReasoningField = devModel.interleavedField ?: model.interleavedReasoningField,
             inputModalities = devModel.inputModalities ?: model.inputModalities,
             outputModalities = devModel.outputModalities ?: model.outputModalities,
@@ -153,6 +170,48 @@ object ModelsDevApi {
             // overwrite a prior real answer with a meaningless `false`.
             declaresNoEffortTiers = if (devModel.declaresNoEffortTiers) true else model.declaresNoEffortTiers,
         )
+    }
+
+    // MARK: - Normalized model matching
+
+    /**
+     * Normalize a model id for cross-catalog matching: strip any vendor path
+     * prefix (last segment after '/'), lowercase, and fold '.'/'_' to '-'.
+     * Mirrors iOS ModelsDevAPI.normalizedModelKey so both platforms enrich
+     * the same gateway ids the same way — e.g. a new-api relay serves
+     * `deepseek/deepseek-flash` while models.dev keys it `deepseek-flash`.
+     * Internal (not private) so unit tests can assert it directly.
+     */
+    internal fun normalizedModelKey(id: String): String =
+        id.substringAfterLast('/')
+            .lowercase()
+            .replace('.', '-')
+            .replace('_', '-')
+
+    /**
+     * Resolve a catalog entry for a model id within one provider.
+     * Exact id match first; normalized match only when the id actually
+     * differs from its normalized form (avoids false positives on ids
+     * that are already normalized). Deterministic within a provider:
+     * colliding normalized keys pick the alphabetically first.
+     */
+    private fun resolveDevModel(prov: ProviderEntry, modelId: String): ModelDevEntry? {
+        prov.models[modelId]?.let { return it }
+        val wanted = normalizedModelKey(modelId)
+        if (wanted == modelId) return null
+        return prov.models.keys.sorted().firstOrNull { normalizedModelKey(it) == wanted }
+            ?.let { prov.models[it] }
+    }
+
+    /**
+     * Test-only seam: installs a registry directly so unit tests can exercise
+     * enrichment without network/disk/assets. Production code never calls this.
+     * Passing null clears the registry (loadRegistry then falls through to the
+     * usual tiers, which are all unavailable in the JVM → null).
+     */
+    internal fun setRegistryForTesting(registry: Map<String, ProviderEntry>?) {
+        cachedRegistry = registry
+        cacheTimestamp = System.currentTimeMillis()
     }
 
     // MARK: - Build models from provider entry

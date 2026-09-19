@@ -65,12 +65,35 @@ enum OpenAIModelsAPI {
                 userInfo: [NSLocalizedDescriptionKey: "Missing data array in response"]))
         }
 
+        let models = parseModels(modelsArray, filterOpenAIOnly: filterOpenAIOnly)
+
+        let enriched = ModelsDevAPI.enrichModels(models)
+        logger.info("Fetched \(modelsArray.count) total models, \(enriched.count) returned (filterOpenAIOnly: \(filterOpenAIOnly))")
+        if let first = modelsArray.first,
+           let debugData = try? JSONSerialization.data(withJSONObject: first, options: [.prettyPrinted, .sortedKeys]),
+           let debugStr = String(data: debugData, encoding: .utf8) {
+            logger.info("First model raw JSON:\n\(debugStr)")
+        }
+        return enriched
+    }
+
+    /// [T-model-metadata-from-api] Parse a /v1/models `data` array into
+    /// LLMModels. Extracted from `performFetch` so unit tests can exercise the
+    /// JSON parsing without network access.
+    ///
+    /// Reads capability fields (`context_length`, `max_output_tokens`,
+    /// `reasoning`) straight from the OpenAI-compatible response — new-api and
+    /// OpenRouter-compat gateways serve them. API wins when present (including
+    /// `reasoning: false`); models.dev enrichment only fills gaps afterwards
+    /// (see ModelsDevAPI.applyDevData). `as? Int` / `as? Bool` are naturally
+    /// safe against NSNull and non-numeric garbage (yield nil).
+    static func parseModels(_ items: [[String: Any]], filterOpenAIOnly: Bool = true) -> [LLMModel] {
         // For official OpenAI endpoints, filter to chat-capable models only.
         // For custom/third-party endpoints, return all models as-is (their IDs won't match OpenAI prefixes).
         let chatPrefixes = ["gpt-", "o1", "o3", "o4-", "codex-", "chatgpt-"]
         let excludeSuffixes = ["-instruct", "-realtime", "-audio", "-transcribe", "-tts", "-embedding"]
 
-        let models = modelsArray.compactMap { item -> LLMModel? in
+        return items.compactMap { item -> LLMModel? in
             guard let id = item["id"] as? String else { return nil }
 
             if filterOpenAIOnly {
@@ -136,17 +159,20 @@ enum OpenAIModelsAPI {
             // text-only endpoints stay text-only, while real OpenAI vision
             // models still get `.imageInput` from the architecture block
             // above (or from models.dev / pattern inference downstream).
-            return LLMModel(id: id, displayName: displayName, provider: "OpenAI", modalityOverride: modality)
-        }
+            let contextWindow = (item["context_length"] as? Int).flatMap { $0 > 0 ? $0 : nil }
+            let maxOutputTokens = (item["max_output_tokens"] as? Int).flatMap { $0 > 0 ? $0 : nil }
+            let supportsReasoning = item["reasoning"] as? Bool
 
-        let enriched = ModelsDevAPI.enrichModels(models)
-        logger.info("Fetched \(modelsArray.count) total models, \(enriched.count) returned (filterOpenAIOnly: \(filterOpenAIOnly))")
-        if let first = modelsArray.first,
-           let debugData = try? JSONSerialization.data(withJSONObject: first, options: [.prettyPrinted, .sortedKeys]),
-           let debugStr = String(data: debugData, encoding: .utf8) {
-            logger.info("First model raw JSON:\n\(debugStr)")
+            return LLMModel(
+                id: id,
+                displayName: displayName,
+                provider: "OpenAI",
+                modalityOverride: modality,
+                contextWindow: contextWindow,
+                maxOutputTokens: maxOutputTokens,
+                supportsReasoning: supportsReasoning
+            )
         }
-        return enriched
     }
 
     /// Strip `_input` / `_output` suffix and lowercase. Provider APIs are inconsistent —

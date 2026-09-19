@@ -160,14 +160,32 @@ object OpenAIModelsApi {
                     idLower.startsWith("o4") ||
                     idLower.contains("codex")
 
+                // [T-model-metadata-from-api] Read capability fields straight
+                // from the OpenAI-compatible /v1/models response (new-api and
+                // OpenRouter-compat gateways serve context_length /
+                // max_output_tokens / reasoning). API wins when present;
+                // knownReasoning only fills the gap when the API is silent
+                // (apiReasoning ?: knownReasoning — a JSON `false` is kept).
+                // Guard `reasoning` with isNull: a JSON null would otherwise
+                // throw in getBoolean and abort the whole parse (→ fallback).
+                val contextWindow = obj.optInt("context_length", 0).takeIf { it > 0 }
+                val maxOutputTokens = obj.optInt("max_output_tokens", 0).takeIf { it > 0 }
+                val apiReasoning = if (obj.has("reasoning") && !obj.isNull("reasoning")) {
+                    obj.getBoolean("reasoning")
+                } else {
+                    null
+                }
+
                 parsed.add(
                     LLMModel(
                         id = id,
                         displayName = displayName,
                         provider = if (isCustomBase) "Custom" else "OpenAI",
+                        contextWindow = contextWindow,
+                        maxOutputTokens = maxOutputTokens,
                         inputModalities = inputModalities,
                         outputModalities = outputModalities,
-                        supportsReasoning = if (knownReasoning) true else null,
+                        supportsReasoning = apiReasoning ?: if (knownReasoning) true else null,
                     )
                 )
             }
