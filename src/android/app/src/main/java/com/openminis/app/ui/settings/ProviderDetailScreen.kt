@@ -62,6 +62,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
+import com.openminis.app.data.model.ModelEntry
 import com.openminis.app.data.model.ProviderType
 import com.openminis.app.data.repository.ProviderRepository
 import com.openminis.app.logging.AppLogger
@@ -1182,3 +1183,34 @@ private fun ModalityIconsRow(
         if ("video" in outputModalities) Icon(Icons.Default.MovieCreation, contentDescription = stringResource(R.string.modeldetail_video_output), tint = outputTint, modifier = size)
     }
 }
+
+/**
+ * [T-android-model-list-search] Pure search filter for the provider model
+ * list. Matches the model id OR display name, case-insensitively, and caps the
+ * result at [maxShown]. A blank query collapses to the first [maxShown]
+ * entries (rank order preserved) instead of filtering. Top-level and
+ * side-effect free so the UI can call it from remember/derivedStateOf without
+ * re-sorting on every recomposition.
+ */
+fun filterModelsForSearch(
+    entries: List<ModelEntry>,
+    query: String,
+    maxShown: Int,
+): List<ModelEntry> {
+    val needle = query.trim().lowercase()
+    if (needle.isEmpty()) return collapseEntries(entries, maxShown)
+    return entries
+        .filter { entry ->
+            entry.model.id.lowercase().contains(needle) ||
+                entry.model.displayName.lowercase().contains(needle)
+        }
+        .take(maxShown)
+}
+
+/**
+ * [T-android-model-list-search] Collapse helper: keeps the list bounded when
+ * no search is active by taking the first [maxShown] entries, preserving the
+ * existing (release-rank) order.
+ */
+fun collapseEntries(entries: List<ModelEntry>, maxShown: Int): List<ModelEntry> =
+    entries.take(maxShown)
