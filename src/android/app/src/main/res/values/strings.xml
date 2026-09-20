@@ -1062,6 +1062,12 @@
     <string name="provider_detail_delete_model">Delete Model</string>
     <string name="provider_detail_hide_model">Hide Model</string>
     <string name="provider_detail_show_model">Show Model</string>
+    <!-- [T-android-model-list-search] Search/collapse UI for the provider
+         Models section. -->
+    <string name="provider_detail_search_models">Search models</string>
+    <string name="provider_detail_show_all_models">Show all %1$d models</string>
+    <string name="provider_detail_show_fewer_models">Show fewer</string>
+    <string name="provider_detail_models_search_no_match">No matching models found.</string>
     <string name="provider_detail_sign_out">Sign Out</string>
     <string name="provider_detail_sign_in">Sign In</string>
     <string name="provider_detail_save_key">Save Key</string>

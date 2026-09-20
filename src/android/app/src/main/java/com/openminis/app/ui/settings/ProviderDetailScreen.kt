@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -22,6 +24,8 @@ import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MovieCreation
@@ -66,6 +70,7 @@ import com.openminis.app.data.model.ModelEntry
 import com.openminis.app.data.model.ProviderType
 import com.openminis.app.data.repository.ProviderRepository
 import com.openminis.app.logging.AppLogger
+import com.openminis.app.ui.components.DialogTextField
 import com.openminis.app.ui.components.MinisAlertDialog
 import com.openminis.app.ui.util.bringIntoViewOnFocus
 import com.openminis.app.R
@@ -79,6 +84,9 @@ import com.openminis.app.ui.components.MinisTextButton
 import com.openminis.app.ui.components.SectionTextField
 
 private const val TAG = "ProviderDetail"
+
+/** [T-android-model-list-search] Collapsed/search-result cap for the Models list. */
+private const val MAX_SHOWN_MODELS = 20
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -134,6 +142,24 @@ fun ProviderDetailScreen(
 
     val entries = providerRepository.entriesFor(instanceId)
     var isRefreshing by remember { mutableStateOf(false) }
+
+    // [T-android-model-list-search] Search + collapse state for the Models
+    // section. searchText drives the filter; modelsExpanded toggles between
+    // the collapsed cap and the full (lazy) list.
+    var searchText by remember { mutableStateOf("") }
+    var modelsExpanded by remember { mutableStateOf(false) }
+
+    // Derived view of the model list: search filters (capped at
+    // MAX_SHOWN_MODELS), otherwise the full list when expanded, otherwise the
+    // collapsed first-N. Recomputed only when entries/search/expansion change.
+    val isSearching = searchText.isNotBlank()
+    val shownEntries = remember(entries, searchText, modelsExpanded) {
+        when {
+            isSearching -> filterModelsForSearch(entries, searchText, MAX_SHOWN_MODELS)
+            modelsExpanded -> entries
+            else -> collapseEntries(entries, MAX_SHOWN_MODELS)
+        }
+    }
 
     val exportContext = androidx.compose.ui.platform.LocalContext.current
 
@@ -526,6 +552,22 @@ fun ProviderDetailScreen(
         ThinkingRulesSection(instance = instance, providerRepository = providerRepository)
 
         // ─── Models ─────────────────────────────────────────────────
+        // [T-android-model-list-search] Search field above the section,
+        // mirroring SkillsManagementScreen. Only shown for providers with more
+        // models than the collapsed cap — a small list doesn't need it.
+        if (entries.size > MAX_SHOWN_MODELS) {
+            DialogTextField(
+                value = searchText,
+                onValueChange = { searchText = it },
+                placeholder = stringResource(R.string.provider_detail_search_models),
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 12.dp),
+            )
+        }
+
         SettingsSection(
             header = stringResource(R.string.provider_detail_models_count_header, entries.size),
         ) {
@@ -559,149 +601,87 @@ fun ProviderDetailScreen(
                 showDivider = entries.isNotEmpty() || true,
             )
 
-            entries.forEachIndexed { idx, entry ->
-                // Drive both tap and long-press from a Box wrapper so we
-                // don't have to expand SettingsRow's signature.
-                Box(
+            // [T-android-model-row-hide-action] Shared hide-toggle handler for
+            // the extracted row composable (used by both the plain and lazy
+            // render paths). Write straight through — no Save step. This is the
+            // whole point of the affordance, and it mirrors iOS, whose eye
+            // button calls store.updateEntry immediately.
+            val onHideToggle: (ModelEntry) -> Unit = { target ->
+                providerRepository.updateEntry(target.copy(isHidden = !target.isHidden))
+                AppLogger.info(
+                    TAG,
+                    "Model entry ${target.id} (${target.model.displayName}) " +
+                        "isHidden ${target.isHidden} -> ${!target.isHidden}",
+                )
+            }
+
+            // [T-android-model-list-search] Expand/collapse toggle. Only
+            // meaningful when the provider exposes more models than the
+            // collapsed cap; hidden while searching because search results are
+            // already capped.
+            if (entries.size > MAX_SHOWN_MODELS && !isSearching) {
+                SettingsRow(
+                    title = stringResource(
+                        if (modelsExpanded) R.string.provider_detail_show_fewer_models
+                        else R.string.provider_detail_show_all_models,
+                        entries.size,
+                    ),
+                    onClick = { modelsExpanded = !modelsExpanded },
+                    showChevron = false,
+                    trailing = {
+                        Icon(
+                            if (modelsExpanded) Icons.Default.KeyboardArrowUp
+                            else Icons.Default.KeyboardArrowDown,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
+                    showDivider = shownEntries.isNotEmpty(),
+                )
+            }
+
+            if (isSearching && shownEntries.isEmpty()) {
+                // No-match empty state inside the card.
+                SettingsRow(
+                    title = stringResource(R.string.provider_detail_models_search_no_match),
+                    onClick = null,
+                    showChevron = false,
+                    showDivider = false,
+                )
+            } else if (modelsExpanded && entries.size > MAX_SHOWN_MODELS) {
+                // Expanded: render lazily inside a bounded-height list so a
+                // provider with thousands of models doesn't compose them all
+                // into the outer scrollable Column. Keyed by entry.id (the
+                // uuid) — model.id can repeat for custom models and duplicate
+                // LazyColumn keys would crash.
+                LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        // [T-android-hidden-model-visual-state] Dim hidden
-                        // entries so the list visually distinguishes them from
-                        // active models — the " • Hidden" subtitle suffix alone
-                        // wasn't enough for users to tell them apart. alpha is
-                        // visual-only, so the row stays tappable to re-show the
-                        // model from its detail screen.
-                        .then(if (entry.isHidden) Modifier.alpha(0.45f) else Modifier)
-                        .combinedClickable(
-                            onClick = { onModelEntryClick(entry.id) },
-                            // [T-android-model-row-hide-action] Long-press now
-                            // opens a menu instead of going straight to delete.
-                            // Hiding was previously reachable ONLY by opening
-                            // the model's detail screen, flipping the
-                            // Visibility switch and pressing Save — five steps
-                            // for what iOS does with one tap on an eye button
-                            // in this very list (ProviderInstanceDetailView).
-                            //
-                            // A menu rather than a trailing icon button because
-                            // the row's trailing slot is a FIXED 72dp capability
-                            // -badge area, deliberately sized so the chevron
-                            // lands at the same x on every row; adding a button
-                            // there would reintroduce the ragged column that
-                            // sizing exists to prevent.
-                            //
-                            // It also fills a dead gesture: long-press used to
-                            // be null for built-in entries, so they had no
-                            // context action at all. They still cannot be
-                            // deleted (the repo re-creates them from
-                            // ProviderType.builtInModels on the next refresh),
-                            // but hiding is exactly the supported way to get one
-                            // out of the picker.
-                            onLongClick = { menuEntryId = entry.id },
-                        ),
+                        .heightIn(max = 560.dp),
                 ) {
-                    // [T-android-model-capability-output-tags] (XIN msg 38847)
-                    // The list previously read INPUT modalities only, so a
-                    // generator like gpt-image-2 (image_output) or an
-                    // audio_output model showed no capability badge at all.
-                    // Surface both directions — input badges are muted, output
-                    // badges use a tinted "generate"-style glyph so they read
-                    // distinctly. Mirrors iOS #669.
-                    val inputModalities = entry.model.inputModalities.orEmpty()
-                    val outputModalities = entry.model.outputModalities.orEmpty()
-                    val hasBadge = inputModalities.any { it in modalityIconKeys } ||
-                        outputModalities.any { it in modalityOutputIconKeys }
-                    SettingsRow(
-                        title = entry.model.displayName,
-                        subtitle = buildString {
-                            append(entry.model.id)
-                            if (entry.isHidden) append(" • Hidden")
-                        },
-                        // onClick = null so SettingsRow doesn't add a second
-                        // clickable that would swallow the long-press. The
-                        // wrapping Box owns both gestures.
-                        onClick = null,
-                        showChevron = true,
-                        showDivider = idx != entries.lastIndex,
-                        // [T-android-settings-ui-md3] #8 two-line row (name + id)
-                        // uses the MD3 double-line height (72dp).
-                        minHeight = 72.dp,
-                        // #9 The capability-icon area has a FIXED width so the
-                        // trailing chevron lands at the same x on every row,
-                        // regardless of how many badges (0–4) a model has —
-                        // previously the chevron slid left/right per row and the
-                        // column looked ragged. Icons right-align within the slot.
-                        trailing = {
-                            Box(
-                                modifier = Modifier.width(72.dp),
-                                contentAlignment = Alignment.CenterEnd,
-                            ) {
-                                if (hasBadge) {
-                                    ModalityIconsRow(inputModalities, outputModalities)
-                                }
-                            }
-                        },
-                    )
-
-                    // [T-android-model-row-hide-action] Row context menu. Anchored
-                    // inside the row's Box so it opens over the entry the user
-                    // pressed. Delete stays custom-only, matching the previous
-                    // long-press behaviour and the repo's constraint.
-                    DropdownMenu(
-                        expanded = menuEntryId == entry.id,
-                        onDismissRequest = { menuEntryId = null },
-                    ) {
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    stringResource(
-                                        if (entry.isHidden) R.string.provider_detail_show_model
-                                        else R.string.provider_detail_hide_model,
-                                    ),
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    if (entry.isHidden) Icons.Filled.Visibility
-                                    else Icons.Filled.VisibilityOff,
-                                    contentDescription = null,
-                                )
-                            },
-                            onClick = {
-                                menuEntryId = null
-                                // Write straight through — no Save step. This is
-                                // the whole point of the affordance, and it
-                                // mirrors iOS, whose eye button calls
-                                // store.updateEntry immediately.
-                                providerRepository.updateEntry(entry.copy(isHidden = !entry.isHidden))
-                                AppLogger.info(
-                                    TAG,
-                                    "Model entry ${entry.id} (${entry.model.displayName}) " +
-                                        "isHidden ${entry.isHidden} -> ${!entry.isHidden}",
-                                )
-                            },
+                    itemsIndexed(shownEntries, key = { _, entry -> entry.id }) { idx, entry ->
+                        ModelEntryRow(
+                            entry = entry,
+                            showDivider = idx != shownEntries.lastIndex,
+                            menuEntryId = menuEntryId,
+                            onMenuEntryIdChange = { menuEntryId = it },
+                            onModelEntryClick = onModelEntryClick,
+                            onHideToggle = onHideToggle,
+                            onDeleteRequest = { entryToDelete = it },
                         )
-                        if (entry.isCustom) {
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        stringResource(R.string.common_delete),
-                                        color = MaterialTheme.colorScheme.error,
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Filled.Delete,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.error,
-                                    )
-                                },
-                                onClick = {
-                                    menuEntryId = null
-                                    entryToDelete = entry
-                                },
-                            )
-                        }
                     }
+                }
+            } else {
+                shownEntries.forEachIndexed { idx, entry ->
+                    ModelEntryRow(
+                        entry = entry,
+                        showDivider = idx != shownEntries.lastIndex,
+                        menuEntryId = menuEntryId,
+                        onMenuEntryIdChange = { menuEntryId = it },
+                        onModelEntryClick = onModelEntryClick,
+                        onHideToggle = onHideToggle,
+                        onDeleteRequest = { entryToDelete = it },
+                    )
                 }
             }
         }
@@ -1181,6 +1161,158 @@ private fun ModalityIconsRow(
         if ("image" in outputModalities) Icon(Icons.Default.AddPhotoAlternate, contentDescription = stringResource(R.string.modeldetail_image_output), tint = outputTint, modifier = size)
         if ("audio" in outputModalities) Icon(Icons.Default.VolumeUp, contentDescription = stringResource(R.string.modeldetail_audio_output), tint = outputTint, modifier = size)
         if ("video" in outputModalities) Icon(Icons.Default.MovieCreation, contentDescription = stringResource(R.string.modeldetail_video_output), tint = outputTint, modifier = size)
+    }
+}
+
+/**
+ * One model row in the provider Models list: tap opens the model detail,
+ * long-press opens the hide/delete context menu. Extracted from the inline
+ * forEach so the same row renders in both the plain (collapsed/search) list
+ * and the lazy expanded list.
+ */
+@Composable
+private fun ModelEntryRow(
+    entry: ModelEntry,
+    showDivider: Boolean,
+    menuEntryId: String?,
+    onMenuEntryIdChange: (String?) -> Unit,
+    onModelEntryClick: (String) -> Unit,
+    onHideToggle: (ModelEntry) -> Unit,
+    onDeleteRequest: (ModelEntry) -> Unit,
+) {
+    // Drive both tap and long-press from a Box wrapper so we
+    // don't have to expand SettingsRow's signature.
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            // [T-android-hidden-model-visual-state] Dim hidden
+            // entries so the list visually distinguishes them from
+            // active models — the " • Hidden" subtitle suffix alone
+            // wasn't enough for users to tell them apart. alpha is
+            // visual-only, so the row stays tappable to re-show the
+            // model from its detail screen.
+            .then(if (entry.isHidden) Modifier.alpha(0.45f) else Modifier)
+            .combinedClickable(
+                onClick = { onModelEntryClick(entry.id) },
+                // [T-android-model-row-hide-action] Long-press now
+                // opens a menu instead of going straight to delete.
+                // Hiding was previously reachable ONLY by opening
+                // the model's detail screen, flipping the
+                // Visibility switch and pressing Save — five steps
+                // for what iOS does with one tap on an eye button
+                // in this very list (ProviderInstanceDetailView).
+                //
+                // A menu rather than a trailing icon button because
+                // the row's trailing slot is a FIXED 72dp capability
+                // -badge area, deliberately sized so the chevron
+                // lands at the same x on every row; adding a button
+                // there would reintroduce the ragged column that
+                // sizing exists to prevent.
+                //
+                // It also fills a dead gesture: long-press used to
+                // be null for built-in entries, so they had no
+                // context action at all. They still cannot be
+                // deleted (the repo re-creates them from
+                // ProviderType.builtInModels on the next refresh),
+                // but hiding is exactly the supported way to get one
+                // out of the picker.
+                onLongClick = { onMenuEntryIdChange(entry.id) },
+            ),
+    ) {
+        // [T-android-model-capability-output-tags] (XIN msg 38847)
+        // The list previously read INPUT modalities only, so a
+        // generator like gpt-image-2 (image_output) or an
+        // audio_output model showed no capability badge at all.
+        // Surface both directions — input badges are muted, output
+        // badges use a tinted "generate"-style glyph so they read
+        // distinctly. Mirrors iOS #669.
+        val inputModalities = entry.model.inputModalities.orEmpty()
+        val outputModalities = entry.model.outputModalities.orEmpty()
+        val hasBadge = inputModalities.any { it in modalityIconKeys } ||
+            outputModalities.any { it in modalityOutputIconKeys }
+        SettingsRow(
+            title = entry.model.displayName,
+            subtitle = buildString {
+                append(entry.model.id)
+                if (entry.isHidden) append(" • Hidden")
+            },
+            // onClick = null so SettingsRow doesn't add a second
+            // clickable that would swallow the long-press. The
+            // wrapping Box owns both gestures.
+            onClick = null,
+            showChevron = true,
+            showDivider = showDivider,
+            // [T-android-settings-ui-md3] #8 two-line row (name + id)
+            // uses the MD3 double-line height (72dp).
+            minHeight = 72.dp,
+            // #9 The capability-icon area has a FIXED width so the
+            // trailing chevron lands at the same x on every row,
+            // regardless of how many badges (0–4) a model has —
+            // previously the chevron slid left/right per row and the
+            // column looked ragged. Icons right-align within the slot.
+            trailing = {
+                Box(
+                    modifier = Modifier.width(72.dp),
+                    contentAlignment = Alignment.CenterEnd,
+                ) {
+                    if (hasBadge) {
+                        ModalityIconsRow(inputModalities, outputModalities)
+                    }
+                }
+            },
+        )
+
+        // [T-android-model-row-hide-action] Row context menu. Anchored
+        // inside the row's Box so it opens over the entry the user
+        // pressed. Delete stays custom-only, matching the previous
+        // long-press behaviour and the repo's constraint.
+        DropdownMenu(
+            expanded = menuEntryId == entry.id,
+            onDismissRequest = { onMenuEntryIdChange(null) },
+        ) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        stringResource(
+                            if (entry.isHidden) R.string.provider_detail_show_model
+                            else R.string.provider_detail_hide_model,
+                        ),
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        if (entry.isHidden) Icons.Filled.Visibility
+                        else Icons.Filled.VisibilityOff,
+                        contentDescription = null,
+                    )
+                },
+                onClick = {
+                    onMenuEntryIdChange(null)
+                    onHideToggle(entry)
+                },
+            )
+            if (entry.isCustom) {
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            stringResource(R.string.common_delete),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Filled.Delete,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    },
+                    onClick = {
+                        onMenuEntryIdChange(null)
+                        onDeleteRequest(entry)
+                    },
+                )
+            }
+        }
     }
 }
 
