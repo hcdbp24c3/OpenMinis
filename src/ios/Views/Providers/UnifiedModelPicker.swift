@@ -3,6 +3,25 @@ import AVFoundation
 
 private let pickerLog = AppLogger(category: "UnifiedPicker")
 
+// MARK: - Fuzzy Search Helper
+
+/// Fuzzy substring match shared by the model picker and the provider detail
+/// model list. True when `text` contains `query` as a substring, or when every
+/// character of `query` appears in `text` in order (subsequence match).
+/// Case-insensitive; an empty query matches everything.
+func fuzzyMatch(query: String, text: String) -> Bool {
+    guard !query.isEmpty else { return true }
+    let q = query.lowercased()
+    let t = text.lowercased()
+    if t.contains(q) { return true }
+    var idx = t.startIndex
+    for ch in q {
+        guard let found = t[idx...].firstIndex(of: ch) else { return false }
+        idx = t.index(after: found)
+    }
+    return true
+}
+
 // MARK: - Virtual System Voice Entries
 
 extension ModelEntry {
@@ -380,16 +399,7 @@ struct UnifiedModelPicker: View {
     // MARK: - Search
 
     private func fuzzyMatch(_ text: String) -> Bool {
-        guard !searchText.isEmpty else { return true }
-        let query = searchText.lowercased()
-        let target = text.lowercased()
-        if target.contains(query) { return true }
-        var idx = target.startIndex
-        for ch in query {
-            guard let found = target[idx...].firstIndex(of: ch) else { return false }
-            idx = target.index(after: found)
-        }
-        return true
+        fuzzyMatch(query: searchText, text: text)
     }
 
     private var filteredEntriesByInstance: [(instance: ProviderInstance, entries: [ModelEntry])] {

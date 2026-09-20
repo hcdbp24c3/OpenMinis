@@ -1386,6 +1386,15 @@ final class ProviderConfigStore: ObservableObject {
             .sorted(by: Self.releaseRankOrder)
     }
 
+    /// Entries for one instance in storage order — NO release-rank sort.
+    /// [T-model-list-search] Search paths use this so the expensive
+    /// `releaseRankOrder` comparator never runs on the keystroke path; search
+    /// results are relevance-filtered, not ranked. Default (no-search) lists
+    /// keep `entries(for:)`'s release ranking.
+    func rawEntries(for instanceId: String) -> [ModelEntry] {
+        config.modelEntries.filter { $0.providerInstanceId == instanceId }
+    }
+
     /// Entries a picker should show for one instance, newest/most capable first.
     ///
     /// [T-model-release-ranking] Deliberately NOT alphabetical. Sorting by

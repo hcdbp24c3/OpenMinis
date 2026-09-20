@@ -28,6 +28,10 @@ struct ProviderInstanceDetailView: View {
     @State private var editingModelEntry: ModelEntry?
     @State private var pendingDeleteModelEntry: ModelEntry?
     @State private var showKeyRevealed = false
+    /// [T-ios-model-list-search] Search query for the Models section. While
+    /// non-empty the section skips the release-rank re-sort and filters the raw
+    /// entries instead (search results are relevance-filtered, not ranked).
+    @State private var searchText = ""
 
     private var instance: ProviderInstance? {
         store.instance(for: instanceId)
@@ -44,6 +48,7 @@ struct ProviderInstanceDetailView: View {
         }
         .navigationTitle(instance?.label ?? "Provider")
         .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $searchText, prompt: "Search models")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -721,18 +726,31 @@ struct ProviderInstanceDetailView: View {
 
     @ViewBuilder
     private func modelListSection(_ instance: ProviderInstance) -> some View {
-        let entries = store.entries(for: instance.id)
+        // [T-ios-model-list-search] Default (no search) keeps the release-rank
+        // order from `entries(for:)`. While a query is active, skip the
+        // expensive rank comparator entirely and filter the raw storage-order
+        // entries — search results are relevance-filtered, not ranked, and the
+        // rank sort would dominate the keystroke path (~44k rank calls for a
+        // 2000-model provider).
+        let entries: [ModelEntry] = searchText.isEmpty
+            ? store.entries(for: instance.id)
+            : store.rawEntries(for: instance.id).filter { entry in
+                fuzzyMatch(query: searchText, text: entry.model.displayName)
+                    || fuzzyMatch(query: searchText, text: entry.model.id)
+            }
 
         if entries.isEmpty {
             VStack(spacing: 8) {
-                Text("No models")
+                Text(searchText.isEmpty ? "No models" : "No matching models")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Button {
-                    showAddCustomModel = true
-                } label: {
-                    Label("Add Custom Model", systemImage: "plus.circle")
-                        .font(.subheadline)
+                if searchText.isEmpty {
+                    Button {
+                        showAddCustomModel = true
+                    } label: {
+                        Label("Add Custom Model", systemImage: "plus.circle")
+                            .font(.subheadline)
+                    }
                 }
             }
             .frame(maxWidth: .infinity)
