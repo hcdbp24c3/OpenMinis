@@ -274,6 +274,11 @@ struct UnifiedModelPicker: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var searchText = ""
+    /// [T-ios-model-picker-debounce] Debounced copy of `searchText` (250ms).
+    /// The field binds to `searchText` for immediate feedback, but the
+    /// ~2000-entry filter reads this debounced value so it runs at most once
+    /// per pause instead of on every keystroke.
+    @State private var debouncedSearchText = ""
     @State private var selectedEntryIds: Set<String> = []
     @State private var expandedGroupIds: Set<String> = []
     @State private var collapsedInstanceIds: Set<String> = []
@@ -336,6 +341,11 @@ struct UnifiedModelPicker: View {
 
     private var entriesByInstance: [(instance: ProviderInstance, entries: [ModelEntry])] {
         var result: [(ProviderInstance, [ModelEntry])] = []
+        // [T-ios-model-picker-debounce] While a search is active (raw
+        // `searchText` non-empty) skip the expensive release-rank re-sort — the
+        // comparator never runs on the keystroke path. Default (no search)
+        // keeps newest-first release ranking.
+        let searching = !searchText.isEmpty
         // Built-in System engine FIRST — as its own provider section (Phase C), the
         // same collapsible header treatment as any cloud provider, driven by the
         // synthetic local-only instance rather than a parallel systemSection.
@@ -389,7 +399,7 @@ struct UnifiedModelPicker: View {
                     // T-model-release-ranking exists to prevent (OpenMinis#83 —
                     // the unusable model's 400 renders as an empty reply and
                     // reads as "the app is broken").
-                    result.append((instance, entries.sorted(by: ProviderConfigStore.releaseRankOrder)))
+                    result.append((instance, searching ? entries : entries.sorted(by: ProviderConfigStore.releaseRankOrder)))
                 }
             }
         }
@@ -399,11 +409,11 @@ struct UnifiedModelPicker: View {
     // MARK: - Search
 
     private func fuzzyMatch(_ text: String) -> Bool {
-        fuzzyMatch(query: searchText, text: text)
+        fuzzyMatch(query: debouncedSearchText, text: text)
     }
 
     private var filteredEntriesByInstance: [(instance: ProviderInstance, entries: [ModelEntry])] {
-        guard !searchText.isEmpty else { return entriesByInstance }
+        guard !debouncedSearchText.isEmpty else { return entriesByInstance }
         return entriesByInstance.compactMap { item in
             let filtered = item.entries.filter { entry in
                 fuzzyMatch(entry.model.displayName) || fuzzyMatch(entry.model.id)
@@ -418,11 +428,11 @@ struct UnifiedModelPicker: View {
         switch config.groupScope {
         case .all:
             let groups = store.modelGroups
-            guard !searchText.isEmpty else { return groups }
+            guard !debouncedSearchText.isEmpty else { return groups }
             return groups.filter { fuzzyMatch($0.name) }
         case .single(let groupId):
             guard let gid = groupId, let g = store.group(for: gid) else { return [] }
-            guard !searchText.isEmpty else { return [g] }
+            guard !debouncedSearchText.isEmpty else { return [g] }
             if fuzzyMatch(g.name) { return [g] }
             let memberMatch = g.memberEntryIds.contains { id in
                 store.entry(for: id).map { fuzzyMatch($0.model.displayName) } ?? false
@@ -514,6 +524,15 @@ struct UnifiedModelPicker: View {
         .onAppear {
             seedCollapse()
             SystemVoiceCatalog.startObservingVoiceChanges()
+        }
+        // [T-ios-model-picker-debounce] Debounce the search field: each
+        // keystroke cancels the previous sleep (`.task(id:)` restarts the task
+        // when `searchText` changes), so the ~2000-entry filter runs at most
+        // once per pause instead of on every keystroke.
+        .task(id: searchText) {
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            debouncedSearchText = searchText
         }
         .toolbar { toolbarContent }
         .sheet(isPresented: $showCreateGroupSheet) {
