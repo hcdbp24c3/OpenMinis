@@ -898,7 +898,7 @@ class ProviderRepository(private val context: Context) {
      * entries rank identically; otherwise the list could visibly reshuffle
      * between reads. Mirrors iOS `ProviderConfigStore.releaseRankOrder`.
      */
-    private val releaseRankOrder = Comparator<ModelEntry> { a, b ->
+    internal val releaseRankOrder = Comparator<ModelEntry> { a, b ->
         val ra = ModelReleaseIndex.rank(
             a.baseModel.id, a.baseModel.displayName, a.baseModel.contextWindow
         )
