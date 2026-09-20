@@ -97,6 +97,12 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+            // [T-ci-side-by-side] CI builds a side-by-side installable APK:
+            // suffix the applicationId with ".ci" so the CI artifact installs
+            // alongside the production app instead of overwriting it. Only
+            // active when the CI workflow exports MINIS_CI_PACKAGE=1; local
+            // release builds keep the plain com.openminis.app id.
+            if (System.getenv("MINIS_CI_PACKAGE") == "1") applicationIdSuffix = ".ci"
         }
     }
 

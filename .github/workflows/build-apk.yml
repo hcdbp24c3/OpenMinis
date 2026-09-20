@@ -13,6 +13,7 @@ on:
   push:
     branches:
       - feat/model-metadata-from-api
+      - feat/model-list-search-from-api
 
 jobs:
   build:
@@ -67,6 +68,11 @@ jobs:
 
       - name: Build release APK
         working-directory: src/android
+        env:
+          # [T-ci-side-by-side] Suffix the release applicationId with ".ci"
+          # (see build.gradle.kts) so the CI APK installs side-by-side with
+          # the production app instead of overwriting it.
+          MINIS_CI_PACKAGE: "1"
         run: ./gradlew assembleRelease --no-daemon
 
       - name: Upload APK
