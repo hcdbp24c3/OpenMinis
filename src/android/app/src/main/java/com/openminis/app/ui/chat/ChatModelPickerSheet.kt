@@ -170,6 +170,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.CompositionLocalProvider
@@ -321,10 +322,13 @@ internal fun ModelPickerSheet(
         }
     }
 
-    var searchText by remember { mutableStateOf("") }
-    // [T-android-model-picker-debounce] The field binds to `searchText` for
-    // immediate feedback, but the ~2000-entry filter reads this debounced copy
-    // so it runs at most once per pause instead of on every keystroke.
+    var searchText by rememberSaveable { mutableStateOf("") }
+    // [T-android-search-state-persist] `rememberSaveable` (not plain `remember`)
+    // on `searchText` — mirrors the exact same bug + fix in ProviderDetailScreen.
+    // Tapping a model row navigates to the entry edits, which destroys this
+    // sheet's state; plain `remember{}` would reset the search keyword (and the
+    // collapsed/expanded list) on the way back. rememberSaveable pins the
+    // keyword to the NavBackStackEntry so a model-edit-and-return keeps it.
     var debouncedSearchText by remember { mutableStateOf("") }
     LaunchedEffect(searchText) {
         debouncedSearchText = debounceSearchText(searchText)
