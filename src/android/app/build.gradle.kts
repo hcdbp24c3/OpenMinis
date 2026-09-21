@@ -202,6 +202,28 @@ val stageDebugSkillAssets by tasks.registering(Exec::class) {
 tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") && it.name.contains("Debug") }
     .configureEach { dependsOn(stageDebugSkillAssets) }
 
+// [T-android-sandbox-assets] Stage the PRoot + Alpine minirootfs assets into
+// the MAIN asset source set at build time. The rootfs (alpine-minirootfs.tar.gz)
+// and PRoot binary (proot-aarch64) are LARGE generated downloads that are
+// intentionally gitignored, so they only exist after scripts/prepare_android_sandbox.sh
+// runs. That script is IDEMPOTENT (checks file presence before re-downloading,
+// matching copyBashismRules' skip-when-present behaviour), so this task is safe
+// to run on every build: it no-ops via the script's own `if [ -f ... ]` guards
+// once the assets are in place. Without it a plain `assembleRelease` ships an
+// APK missing the rootfs, and RootfsManager aborts install at runtime with
+// "Installation failed: alpine-minirootfs.tar". Wire into every merge*Assets +
+// preBuild, and guard with `onlyIf` so a checkout without the script (public
+// mirror) still builds.
+val stageAndroidSandboxAssets by tasks.registering(Exec::class) {
+    val script = rootProject.file("../../scripts/prepare_android_sandbox.sh")
+    onlyIf { script.isFile }
+    if (script.isFile) inputs.file(script)
+    commandLine("bash", script.absolutePath)
+}
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }
+    .configureEach { dependsOn(stageAndroidSandboxAssets) }
+tasks.named("preBuild") { dependsOn(stageAndroidSandboxAssets) }
+
 dependencies {
     // Compose BOM
     val composeBom = platform("androidx.compose:compose-bom:2025.09.00")
