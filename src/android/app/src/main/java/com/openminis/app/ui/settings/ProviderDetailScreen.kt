@@ -54,6 +54,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -146,8 +147,18 @@ fun ProviderDetailScreen(
     // [T-android-model-list-search] Search + collapse state for the Models
     // section. searchText drives the filter; modelsExpanded toggles between
     // the collapsed cap and the full (lazy) list.
-    var searchText by remember { mutableStateOf("") }
-    var modelsExpanded by remember { mutableStateOf(false) }
+    //
+    // [T-android-search-state-persist] Must be `rememberSaveable`, not plain
+    // `remember`: tapping a model entry navigates to ModelEntryDetailScreen,
+    // which removes this composable from the back stack (destroying it), then
+    // back restores it. `remember{}` would reset both fields to their initial
+    // values on that round trip, wiping the search keyword AND the filtered
+    // results the user was working with. rememberSaveable pins them to the
+    // NavBackStackEntry's SavedStateRegistry, so a model-edit-and-return keeps
+    // the search intact. Mirrors ProviderDetailScreen on the other side of the
+    // same bug.
+    var searchText by rememberSaveable { mutableStateOf("") }
+    var modelsExpanded by rememberSaveable { mutableStateOf(false) }
 
     // Derived view of the model list: search filters (capped at
     // MAX_SHOWN_MODELS), otherwise the full list when expanded, otherwise the
