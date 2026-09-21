@@ -1,5 +1,6 @@
 package com.openminis.app.sandbox
 
+import com.openminis.app.BuildConfig
 import android.net.LocalServerSocket
 import android.net.LocalSocket
 import android.util.Log
@@ -52,7 +53,18 @@ fun interface NativeOffloadHandler {
 
 object NativeOffloadServer {
     private const val TAG = "NativeOffloadServer"
-    private const val SOCKET_NAME = "native-offload"
+    private const val SOCKET_NAME_BASE = "native-offload"
+    // [T-android-offload-socket-unique] Abstract Unix sockets on Android live in
+    // a single namespace shared per network-namespace — NOT per app/UID. Two apps
+    // binding the same abstract name collide with EADDRINUSE; the 2nd bind throws
+    // and the app crashes at startup. The side-by-side CI install (applicationId
+    // "com.openminis.app.ci" via applicationIdSuffix ".ci") coexists with the prod
+    // install ("com.openminis.app"), so we derive a UNIQUE socket name per
+    // applicationId — but it must stay deterministic across the PROOT restart so
+    // the same app re-binds the same abstract socket on relaunch (nothing else
+    // depends on the literal base name besides the reply-file prefix, which is
+    // independent: see REPLY_PREFIX).
+
     private const val MAGIC_REQ = 0x46464F4E  // 'N' 'O' 'F' 'F' little-endian
     private const val MAGIC_RSP = 0x52464F4E  // 'N' 'O' 'F' 'R'
     private const val VERSION = 1
@@ -71,9 +83,24 @@ object NativeOffloadServer {
 
     /** Run the opportunistic sweep every N replies, not on every single one. */
     private const val SWEEP_EVERY_N_REPLIES = 50L
-
-    const val socketName: String = SOCKET_NAME
-
+    /**
+     * [T-android-offload-socket-unique] The abstract Unix socket name.
+     *
+     * Abstract Unix sockets on Android live in a single namespace shared
+     * per network namespace — NOT per app or UID. Two apps binding the
+     * same abstract name collide with EADDRINUSE; the second bind throws
+     * and that app crashes at startup. We run a side-by-side CI install
+     * (applicationIdSuffix ".ci" => APPLICATION_ID "com.openminis.app.ci")
+     * alongside the prod install ("com.openminis.app"), so the name is
+     * derived from BuildConfig.APPLICATION_ID to be unique per app id.
+     *
+     * It stays DETERMINISTIC across the PROOT restart: APPLICATION_ID is a
+     * compile-time constant of the build, so the same app re-derives and
+     * re-binds the SAME abstract socket on relaunch. Nothing else depends
+     * on these bytes except host<->guest agreement at this exact string
+     * (the reply-file prefix is an independent literal: REPLY_PREFIX).
+     */
+    val socketName: String = "$SOCKET_NAME_BASE-${BuildConfig.APPLICATION_ID}"
     private val handlers = ConcurrentHashMap<String, NativeOffloadHandler>()
     private val counter = AtomicLong(0)
     private var serverSocket: LocalServerSocket? = null
@@ -107,14 +134,14 @@ object NativeOffloadServer {
         // 100-300ms window.
         val s = bindWithRetry()
             ?: throw java.io.IOException(
-                "failed to bind abstract socket '$SOCKET_NAME' after retries — " +
+                "failed to bind abstract socket '$socketName' after retries — " +
                 "previous process holding the namespace?",
             )
         serverSocket = s
         acceptThread = thread(name = "native-offload-accept", isDaemon = true) {
             runAcceptLoop(s)
         }
-        Log.i(TAG, "listening on abstract socket '$SOCKET_NAME' " +
+        Log.i(TAG, "listening on abstract socket '$socketName' " +
             "handlers=${handlers.keys.sorted()} tmpDir=${rootfsTmpDir?.absolutePath}")
 
         // [T-android-offload-tmp-leak] Sweep reply files orphaned by earlier
@@ -180,7 +207,7 @@ object NativeOffloadServer {
         for ((attempt, delay) in delays.withIndex()) {
             if (delay > 0) Thread.sleep(delay)
             try {
-                return LocalServerSocket(SOCKET_NAME)
+                return LocalServerSocket(socketName)
             } catch (e: java.io.IOException) {
                 Log.w(TAG, "bind attempt ${attempt + 1}/${delays.size} failed: ${e.message}")
             }
