@@ -1231,6 +1231,20 @@ class ProviderRepository(private val context: Context) {
         }
     }
 
+    /**
+     * [T-android-eye-toggle-jank] Fire-and-forget persist of [entry] on the
+     * repository's IO scope. `updateEntry` does a synchronized Room + JSON
+     * double-write that can take tens of ms — on the main thread that stalls
+     * the tap that triggered it (the eye toggle jerks before its icon flips).
+     * Callers should update optimistic UI state FIRST, then call this; the
+     * config StateFlow emit from saveConfig reconciles the UI afterwards.
+     * Thread-safe: updateEntry is fully guarded by configLock, and loadScope
+     * (SupervisorJob + IO) outlives any sheet/screen that scheduled the write.
+     */
+    fun updateEntryAsync(entry: ModelEntry) {
+        loadScope.launch { updateEntry(entry) }
+    }
+
     fun removeEntry(entryId: String): Unit = synchronized(configLock) {
         ensureConfigLoaded()
         val config = workingCopy()

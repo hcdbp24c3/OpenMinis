@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -18,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.DropdownMenu
@@ -80,10 +82,11 @@ fun filterManageModels(entries: List<ModelEntry>, query: String): List<ModelEntr
  * single "Models (N)" row on ProviderDetailScreen. Search is debounced 250ms
  * via [debounceSearchText] so a ~2000-entry filter runs at most once per pause.
  *
- * Rows: displayName + id, eye toggle → updateEntry(isHidden), long-press →
- * Hide/Show + Delete (isCustom only) with the same confirm path as the old
- * inline list, tap → onModelEntryClick(entry.id) WITHOUT dismissing, so the
- * sheet reopens after returning from the model-edit screen.
+ * Rows: displayName + id, eye toggle → optimistic local flip + async persist
+ * (updateEntryAsync; the sync Room+JSON write used to jank the tap), tap →
+ * onModelEntryClick(entry.id) WITHOUT dismissing, so the sheet reopens after
+ * returning from the model-edit screen. Long-press menu (Delete) only for
+ * isCustom entries — Hide/Show lives exclusively on the eye toggle now.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -100,7 +103,27 @@ fun ManageProviderModelsSheet(
         LaunchedEffect(Unit) { onDismiss() }
         return
     }
-    val allEntries = remember(instanceId, config) { providerRepository.entriesFor(instanceId) }
+    val rawEntries = remember(instanceId, config) { providerRepository.entriesFor(instanceId) }
+
+    // [T-android-eye-toggle-jank] Optimistic hidden state: the eye click flips
+    // the row alpha/icon on THIS frame; the durable Room+JSON double-write runs
+    // off-thread via updateEntryAsync. Without this, the synchronous write under
+    // configLock blocked the main thread before the config StateFlow could emit,
+    // so the icon only changed after a visible stall. Overrides are dropped once
+    // the persisted config catches up, keeping raw config the source of truth.
+    var hiddenOverrides by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
+    LaunchedEffect(rawEntries) {
+        if (hiddenOverrides.isEmpty()) return@LaunchedEffect
+        hiddenOverrides = hiddenOverrides.filter { (id, flipped) ->
+            rawEntries.firstOrNull { it.id == id }?.isHidden != flipped
+        }
+    }
+    val allEntries = remember(rawEntries, hiddenOverrides) {
+        rawEntries.map { e ->
+            val flipped = hiddenOverrides[e.id]
+            if (flipped != null && flipped != e.isHidden) e.copy(isHidden = flipped) else e
+        }
+    }
 
     // [T-fix-manage-sheet-reopen] rememberSaveable pins the keyword to the
     // NavBackStackEntry so a model-edit-and-return restores the sheet's search.
@@ -176,41 +199,48 @@ fun ManageProviderModelsSheet(
                         visualTransformation = VisualTransformation.None,
                         innerTextField = innerTextField,
                         placeholder = {
-                            Text(
-                                text = stringResource(R.string.model_picker_search_placeholder),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            Text(stringResource(R.string.model_picker_search_placeholder))
                         },
                         label = null,
-                        trailingIcon = if (searchQuery.isNotEmpty()) {
-                            {
+                        // [T-android-manage-search-parity] Leading Search icon +
+                        // default colors: the Manage sheet's field is now the
+                        // exact twin of the chat "Choose Model" search (which
+                        // reads as the correct size); the missing icon and the
+                        // custom border colors were what made this one look
+                        // smaller/different.
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
                                 IconButton(onClick = { searchQuery = "" }) {
                                     Icon(
                                         Icons.Default.Close,
                                         contentDescription = stringResource(R.string.model_picker_search_clear),
+                                        modifier = Modifier.size(18.dp),
                                     )
                                 }
                             }
-                        } else null,
+                        },
                         singleLine = true,
                         enabled = true,
                         isError = false,
                         interactionSource = searchInteraction,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                        ),
+                        colors = OutlinedTextFieldDefaults.colors(),
+                        // Zero vertical: the 42dp frame plus the icons already
+                        // give the text room; any inset here re-clips it.
                         contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
                         container = {
                             OutlinedTextFieldDefaults.Container(
                                 enabled = true,
                                 isError = false,
                                 interactionSource = searchInteraction,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                                ),
+                                colors = OutlinedTextFieldDefaults.colors(),
                                 shape = RoundedCornerShape(50),
                             )
                         },
@@ -251,11 +281,15 @@ fun ManageProviderModelsSheet(
                             // when the user pops back.
                             onClick = { onModelEntryClick(entry.id) },
                             onHideToggle = { target ->
-                                providerRepository.updateEntry(target.copy(isHidden = !target.isHidden))
+                                // Flip locally FIRST (fast, same frame), then
+                                // persist off the UI thread — see [T-android-eye-toggle-jank].
+                                val newHidden = !target.isHidden
+                                hiddenOverrides = hiddenOverrides + (target.id to newHidden)
                                 AppLogger.info(
                                     SHEET_TAG,
-                                    "Toggled ${target.model.displayName} hidden=${!target.isHidden}",
+                                    "Toggled ${target.model.displayName} hidden=$newHidden",
                                 )
+                                providerRepository.updateEntryAsync(target.copy(isHidden = newHidden))
                             },
                             onDeleteRequest = { entryToDelete = it },
                         )
@@ -298,9 +332,19 @@ private fun ManageModelRow(
         modifier = Modifier
             .fillMaxWidth()
             .then(if (entry.isHidden) Modifier.alpha(0.45f) else Modifier)
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = { onMenuEntryIdChange(entry.id) },
+            // Long-press menu is Delete-only now, and Delete only exists for
+            // custom entries — so non-custom rows get a plain click (no dead
+            // long-press that used to show a redundant Hide/Show item; the eye
+            // toggle already covers hidden state).
+            .then(
+                if (entry.isCustom) {
+                    Modifier.combinedClickable(
+                        onClick = onClick,
+                        onLongClick = { onMenuEntryIdChange(entry.id) },
+                    )
+                } else {
+                    Modifier.clickable(onClick = onClick)
+                },
             ),
     ) {
         Row(
@@ -341,27 +385,9 @@ private fun ManageModelRow(
             expanded = menuEntryId == entry.id,
             onDismissRequest = { onMenuEntryIdChange(null) },
         ) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        stringResource(
-                            if (entry.isHidden) R.string.provider_detail_show_model
-                            else R.string.provider_detail_hide_model,
-                        ),
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        if (entry.isHidden) Icons.Filled.Visibility
-                        else Icons.Filled.VisibilityOff,
-                        contentDescription = null,
-                    )
-                },
-                onClick = {
-                    onMenuEntryIdChange(null)
-                    onHideToggle(entry)
-                },
-            )
+            // Hide/Show menu item removed on purpose: the eye IconButton on the
+            // same row already toggles hidden state, and showing it twice
+            // (long-press + eye) confused which control was authoritative.
             if (entry.isCustom) {
                 DropdownMenuItem(
                     text = {
