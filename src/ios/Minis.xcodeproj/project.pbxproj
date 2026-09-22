@@ -358,6 +358,7 @@
 		E5QA0002 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5QA0102 /* AppDelegate.swift */; };
 		E5QA0003 /* QuickActionWorkflow.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5QA0103 /* QuickActionWorkflow.swift */; };
 		E5QT00001 /* ModelQuickTestSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5QT00011 /* ModelQuickTestSheet.swift */; };
+		E5MPS0001 /* ManageProviderModelsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5MPS0011 /* ManageProviderModelsSheet.swift */; };
 		E5R000001 /* ICloudBackupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5R000011 /* ICloudBackupManager.swift */; };
 		E5R000002 /* ICloudBackupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5R000012 /* ICloudBackupView.swift */; };
 		E5S000001 /* DeviceIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5S000011 /* DeviceIdentity.swift */; };
@@ -1043,6 +1044,7 @@
 		E5QA0102 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		E5QA0103 /* QuickActionWorkflow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionWorkflow.swift; sourceTree = "<group>"; };
 		E5QT00011 /* ModelQuickTestSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelQuickTestSheet.swift; sourceTree = "<group>"; };
+		E5MPS0011 /* ManageProviderModelsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManageProviderModelsSheet.swift; sourceTree = "<group>"; };
 		E5R000011 /* ICloudBackupManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ICloudBackupManager.swift; sourceTree = "<group>"; };
 		E5R000012 /* ICloudBackupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ICloudBackupView.swift; sourceTree = "<group>"; };
 		E5S000011 /* DeviceIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentity.swift; sourceTree = "<group>"; };
@@ -2243,6 +2245,7 @@
 				E5D00034 /* ModelGroupDetailView.swift */,
 				E5D00033 /* ModelGroupsView.swift */,
 				E5QT00011 /* ModelQuickTestSheet.swift */,
+				E5MPS0011 /* ManageProviderModelsSheet.swift */,
 				E5D00036 /* OnboardingModelSelectionView.swift */,
 				E5D00031 /* ProviderInstanceDetailView.swift */,
 				E5TRS002 /* ThinkingRulesSection.swift */,
@@ -2925,6 +2928,7 @@
 				E5KIMIUI1 /* KimiDeviceLoginSheet.swift in Sources */,
 				E5D00023 /* ModelGroupsView.swift in Sources */,
 				E5QT00001 /* ModelQuickTestSheet.swift in Sources */,
+				E5MPS0001 /* ManageProviderModelsSheet.swift in Sources */,
 				E5D00024 /* ModelGroupDetailView.swift in Sources */,
 				E5D00025 /* SessionModelPicker.swift in Sources */,
 				E5UMP0001 /* UnifiedModelPicker.swift in Sources */,
