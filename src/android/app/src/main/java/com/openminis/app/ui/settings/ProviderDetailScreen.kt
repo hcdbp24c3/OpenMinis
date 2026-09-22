@@ -40,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -110,7 +111,9 @@ fun ProviderDetailScreen(
 
     val entries = providerRepository.entriesFor(instanceId)
     var isRefreshing by remember { mutableStateOf(false) }
-    var showManageModelsSheet by remember { mutableStateOf(false) }
+    // [T-fix-manage-sheet-reopen] rememberSaveable pins the sheet visibility
+    // to the NavBackStackEntry so returning from ModelEntryDetail reopens it.
+    var showManageModelsSheet by rememberSaveable { mutableStateOf(false) }
 
     val exportContext = androidx.compose.ui.platform.LocalContext.current
 

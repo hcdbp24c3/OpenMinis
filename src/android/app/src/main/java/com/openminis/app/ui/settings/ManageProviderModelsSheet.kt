@@ -28,7 +28,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -38,11 +39,14 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.openminis.app.R
@@ -51,6 +55,7 @@ import com.openminis.app.data.repository.ProviderRepository
 import com.openminis.app.logging.AppLogger
 import com.openminis.app.ui.chat.debounceSearchText
 import com.openminis.app.ui.components.MinisAlertDialog
+import androidx.compose.foundation.layout.PaddingValues
 
 private const val SHEET_TAG = "ManageModelsSheet"
 
@@ -77,7 +82,8 @@ fun filterManageModels(entries: List<ModelEntry>, query: String): List<ModelEntr
  *
  * Rows: displayName + id, eye toggle → updateEntry(isHidden), long-press →
  * Hide/Show + Delete (isCustom only) with the same confirm path as the old
- * inline list, tap → onDismiss + onModelEntryClick(entry.id).
+ * inline list, tap → onModelEntryClick(entry.id) WITHOUT dismissing, so the
+ * sheet reopens after returning from the model-edit screen.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -96,8 +102,10 @@ fun ManageProviderModelsSheet(
     }
     val allEntries = remember(instanceId, config) { providerRepository.entriesFor(instanceId) }
 
-    var searchQuery by remember { mutableStateOf("") }
-    var debouncedQuery by remember { mutableStateOf("") }
+    // [T-fix-manage-sheet-reopen] rememberSaveable pins the keyword to the
+    // NavBackStackEntry so a model-edit-and-return restores the sheet's search.
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var debouncedQuery by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(searchQuery) {
         debouncedQuery = debounceSearchText(searchQuery)
     }
@@ -143,37 +151,71 @@ fun ManageProviderModelsSheet(
                 )
             }
 
-            // 42dp search capsule.
-            OutlinedTextField(
+            // 42dp search capsule — BasicTextField + DecorationBox (same
+            // pattern as the chat picker). A plain OutlinedTextField forced
+            // to height(42) clips its own 16dp contentPadding and the text
+            // disappears on focus; owning contentPadding is the only way to
+            // keep the frame short without cutting the text.
+            val searchInteraction = remember { MutableInteractionSource() }
+            BasicTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(42.dp)
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .height(42.dp),
                 singleLine = true,
-                shape = RoundedCornerShape(21.dp),
-                placeholder = {
-                    Text(
-                        text = stringResource(R.string.model_picker_search_placeholder),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                interactionSource = searchInteraction,
+                decorationBox = { innerTextField ->
+                    OutlinedTextFieldDefaults.DecorationBox(
+                        value = searchQuery,
+                        visualTransformation = VisualTransformation.None,
+                        innerTextField = innerTextField,
+                        placeholder = {
+                            Text(
+                                text = stringResource(R.string.model_picker_search_placeholder),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                        label = null,
+                        trailingIcon = if (searchQuery.isNotEmpty()) {
+                            {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = stringResource(R.string.model_picker_search_clear),
+                                    )
+                                }
+                            }
+                        } else null,
+                        singleLine = true,
+                        enabled = true,
+                        isError = false,
+                        interactionSource = searchInteraction,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        ),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                        container = {
+                            OutlinedTextFieldDefaults.Container(
+                                enabled = true,
+                                isError = false,
+                                interactionSource = searchInteraction,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                                ),
+                                shape = RoundedCornerShape(50),
+                            )
+                        },
                     )
                 },
-                trailingIcon = if (searchQuery.isNotEmpty()) {
-                    {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = stringResource(R.string.model_picker_search_clear),
-                            )
-                        }
-                    }
-                } else null,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                ),
             )
 
             HorizontalDivider()
@@ -202,10 +244,12 @@ fun ManageProviderModelsSheet(
                             entry = entry,
                             menuEntryId = menuEntryId,
                             onMenuEntryIdChange = { menuEntryId = it },
-                            onClick = {
-                                onDismiss()
-                                onModelEntryClick(entry.id)
-                            },
+                            // [T-fix-manage-sheet-reopen] Do NOT call
+                            // onDismiss here: navigating to the model-edit
+                            // screen disposes the sheet; rememberSaveable on
+                            // the host reopens it (with the search keyword)
+                            // when the user pops back.
+                            onClick = { onModelEntryClick(entry.id) },
                             onHideToggle = { target ->
                                 providerRepository.updateEntry(target.copy(isHidden = !target.isHidden))
                                 AppLogger.info(

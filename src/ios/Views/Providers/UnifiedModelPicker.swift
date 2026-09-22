@@ -3,23 +3,16 @@ import AVFoundation
 
 private let pickerLog = AppLogger(category: "UnifiedPicker")
 
-// MARK: - Fuzzy Search Helper
+// MARK: - Search Helper
 
-/// Fuzzy substring match shared by the model picker and the provider detail
-/// model list. True when `text` contains `query` as a substring, or when every
-/// character of `query` appears in `text` in order (subsequence match).
-/// Case-insensitive; an empty query matches everything.
+/// Precise model search match (Kelivo semantics): case-insensitive contiguous
+/// substring only. No subsequence/fuzzy fallback — `deepseek-flash` must NOT
+/// match `deepseek-v4-flash`. Empty query matches everything. Shared by the
+/// model picker and the provider detail model list.
 func fuzzyMatch(query: String, text: String) -> Bool {
-    guard !query.isEmpty else { return true }
-    let q = query.lowercased()
-    let t = text.lowercased()
-    if t.contains(q) { return true }
-    var idx = t.startIndex
-    for ch in q {
-        guard let found = t[idx...].firstIndex(of: ch) else { return false }
-        idx = t.index(after: found)
-    }
-    return true
+    let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+    if q.isEmpty { return true }
+    return text.lowercased().contains(q)
 }
 
 // MARK: - Virtual System Voice Entries

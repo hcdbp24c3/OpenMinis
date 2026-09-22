@@ -31,6 +31,11 @@ struct ProviderInstanceDetailView: View {
     /// [T-ios-manage-provider-models] Presents the full-catalog manage sheet
     /// from the single "Models (N)" row.
     @State private var showManageModelsSheet = false
+    /// [T-fix-manage-sheet-reopen] True while the edit sheet is up so the
+    /// manage sheet can reopen (with its search keyword) when edit closes.
+    @State private var reopenManageAfterEdit = false
+    /// Search keyword lifted here so the manage sheet can restore it on reopen.
+    @State private var manageSearchText = ""
 
     private var instance: ProviderInstance? {
         store.instance(for: instanceId)
@@ -75,14 +80,30 @@ struct ProviderInstanceDetailView: View {
                 AddCustomModelSheet(instanceId: instance.id)
             }
         }
-        .sheet(isPresented: $showManageModelsSheet) {
+        .onReceive(NotificationCenter.default.publisher(for: .manageModelsSheetDone)) { note in
+            if (note.object as? String) == instanceId {
+                showManageModelsSheet = false
+            }
+        }
+        .sheet(isPresented: $showManageModelsSheet, onDismiss: {
+            // Sheet torn down for the edit path — reopen after edit closes.
+        }) {
             if let instance = instance {
                 ManageProviderModelsSheet(instanceId: instance.id) { entry in
+                    // Close manage first (iOS cannot stack two sheets from the
+                    // same view) and remember to reopen after edit closes.
+                    reopenManageAfterEdit = true
+                    showManageModelsSheet = false
                     editingModelEntry = entry
                 }
             }
         }
-        .sheet(item: $editingModelEntry) { entry in
+        .sheet(item: $editingModelEntry, onDismiss: {
+            if reopenManageAfterEdit {
+                reopenManageAfterEdit = false
+                showManageModelsSheet = true
+            }
+        }) { entry in
             ModelEntryDetailSheet(entry: entry)
         }
         .sheet(isPresented: $showKimiLogin) {

@@ -30,3 +30,16 @@ suspend fun debounceSearchText(
     delay(debounceMillis)
     return searchText
 }
+
+/**
+ * Precise model search match (Kelivo semantics): case-insensitive contiguous
+ * substring only. No subsequence/fuzzy fallback — `deepseek-flash` must NOT
+ * match `deepseek-v4-flash` (chars in order across an interruption).
+ *
+ * Pure and top-level so pickers can memoize it and unit tests can pin it.
+ */
+fun matchesModelQuery(text: String, query: String): Boolean {
+    val needle = query.trim()
+    if (needle.isEmpty()) return true
+    return text.contains(needle, ignoreCase = true)
+}

@@ -1,9 +1,10 @@
 package com.openminis.app.ui.chat
 
-// [T-android-split-chat] ModelPickerSheet (+ its private helpers fuzzyMatch /
-// providerDotColor) extracted verbatim from ChatScreen.kt. Full import block
-// copied from ChatScreen.kt (unused imports are warnings, not errors);
-// ModelPickerSheet flipped private->internal so ChatScreen can call it.
+// [T-android-split-chat] ModelPickerSheet (+ providerDotColor) extracted
+// verbatim from ChatScreen.kt. Full import block copied from ChatScreen.kt
+// (unused imports are warnings, not errors); ModelPickerSheet flipped
+// private->internal so ChatScreen can call it. Search matcher lives in
+// ModelPickerLogic.matchesModelQuery (Kelivo contains-only).
 
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -93,6 +94,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -266,6 +268,7 @@ import com.openminis.app.data.model.LLMModel
 import com.openminis.app.data.model.ModelEntry
 import com.openminis.app.data.model.ModelGroup
 import com.openminis.app.data.model.ProviderConfig
+import com.openminis.app.data.model.ProviderInstance
 import com.openminis.app.data.model.ProviderType
 import com.openminis.app.data.model.RoutingStrategy
 import com.openminis.app.data.model.ThinkingLevel
@@ -276,23 +279,9 @@ import com.openminis.app.ui.browser.BrowserSheet
 import com.openminis.app.ui.theme.ChatColors
 import com.openminis.app.ui.components.MinisTextButton
 
-/**
- * Fuzzy match: substring first, then all query chars appear in order.
- * Matches iOS SessionModelPicker.fuzzyMatch.
- */
-private fun fuzzyMatch(text: String, query: String): Boolean {
-    if (query.isEmpty()) return true
-    val q = query.lowercase()
-    val t = text.lowercase()
-    if (t.contains(q)) return true
-    var idx = 0
-    for (ch in q) {
-        val found = t.indexOf(ch, idx)
-        if (found < 0) return false
-        idx = found + 1
-    }
-    return true
-}
+// [T-android-search-precision] Replaced private fuzzyMatch with
+// matchesModelQuery (Kelivo contains-only). The old subsequence fallback
+// matched "deepseek-flash" inside "deepseek-v4-flash".
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -359,7 +348,7 @@ internal fun ModelPickerSheet(
         if (debouncedSearchText.isEmpty()) groups
         else {
             val t0 = System.nanoTime()
-            val result = groups.filter { fuzzyMatch(it.name, debouncedSearchText) }
+            val result = groups.filter { matchesModelQuery(it.name, debouncedSearchText) }
             val ms = (System.nanoTime() - t0) / 1_000_000.0
             AppLogger.info("ModelPicker", "[ModelPicker] filter groups: ${result.size}/${groups.size}, ${"%.1f".format(ms)}ms")
             result
@@ -384,7 +373,8 @@ internal fun ModelPickerSheet(
                 // order, so ~2000 entries are not re-sorted per keystroke.
                 val filtered = if (searching) {
                     entries.filter {
-                        fuzzyMatch(it.model.displayName, debouncedSearchText) || fuzzyMatch(it.model.id, debouncedSearchText)
+                        matchesModelQuery(it.model.displayName, debouncedSearchText) ||
+                            matchesModelQuery(it.model.id, debouncedSearchText)
                     }
                 } else {
                     orderPickerEntries(entries, searching = false, providerRepository.releaseRankOrder)
@@ -923,88 +913,34 @@ internal fun ModelPickerSheet(
                     }
                 }
 
-                // ── Individual Models by Provider (one section card per provider) ──
-                // Each provider becomes a single grouped card containing: an
-                // embedded header row with the collapse chevron, then either
-                // the collapsed summary row or the expanded entry list. Cards
-                // are visually separated from each other by a 12dp gap, and
-                // sit on a higher tonal surface so the boundary between
-                // providers is unmistakable even on the dark sheet background.
+                // ── Individual Models by Provider ──
+                //
+                // [T-android-showall-lag] COLLAPSED providers stay a single
+                // item (header + summary + "Show N models" — always small).
+                // EXPANDED providers split into a header item plus one lazy
+                // item per entry so LazyColumn virtualizes ~2000 rows instead
+                // of composing them all in one frame (the show-all freeze).
                 if (allInstancesWithEntries.isNotEmpty()) {
                     allInstancesWithEntries.forEach { (instance, entries) ->
                         val isCollapsed = collapsedInstanceIds.contains(instance.id)
-                        item(key = "section_${instance.id}") {
-                            Column(
-                                modifier = Modifier
-                                    .padding(horizontal = 16.dp, vertical = 6.dp)
-                                    .background(
-                                        MaterialTheme.colorScheme.surfaceContainerHigh,
-                                        RoundedCornerShape(14.dp),
-                                    ),
-                            ) {
-                                // Header row, embedded in the card.
-                                Row(
-                                    // T236: tightened provider header padding
-                                    // (top=10/bottom=8) so the gap to the first
-                                    // model row reads as ~8dp rather than the
-                                    // earlier 12dp+row-padding stack.
+                        if (isCollapsed) {
+                            item(key = "section_${instance.id}") {
+                                Column(
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
+                                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                                        .background(
+                                            MaterialTheme.colorScheme.surfaceContainerHigh,
+                                            RoundedCornerShape(14.dp),
+                                        ),
                                 ) {
-                                    Text(
-                                        instance.label.ifEmpty { instance.providerType.displayName },
-                                        // Same rank as the "Model Groups"
-                                        // header above — see that comment.
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.weight(1f),
+                                    ProviderSectionHeader(
+                                        instance = instance,
+                                        isCollapsed = true,
+                                        onToggle = {
+                                            collapsedInstanceIds = collapsedInstanceIds - instance.id
+                                        },
                                     )
-                                    // [T-android-model-picker-polish] Same
-                                    // neutral treatment as the group chevron
-                                    // above — see that comment for why the
-                                    // tinted container was dropped.
-                                    Box(
-                                        modifier = Modifier
-                                            .size(24.dp)
-                                            .background(
-                                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
-                                                CircleShape,
-                                            )
-                                            .clip(CircleShape)
-                                            .clickable {
-                                                collapsedInstanceIds = if (isCollapsed) {
-                                                    collapsedInstanceIds - instance.id
-                                                } else {
-                                                    collapsedInstanceIds + instance.id
-                                                }
-                                            },
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Icon(
-                                            if (isCollapsed) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(16.dp),
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                }
 
-                                // [T-android-model-picker-polish] Hairline under
-                                // the provider name. The rows below it are
-                                // models, not more provider chrome, and without
-                                // a rule the header read as the first list item
-                                // — the same separation the group card gets
-                                // between its own header and its members.
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp),
-                                    thickness = 0.5.dp,
-                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                                )
-
-                                if (isCollapsed) {
                                     // Collapsed summary — show selected or first entry + model count.
                                     val selectedEntry = entries.firstOrNull { it.id == activeEntryId && selectedGroupId == null }
                                     val displayEntry = selectedEntry ?: entries.firstOrNull()
@@ -1126,98 +1062,138 @@ internal fun ModelPickerSheet(
                                         }
                                         }
                                     }
+                                }
+                            }
+                        } else {
+                            // Expanded: header is one item (top-rounded card +
+                            // hairline); each entry is its own item so
+                            // LazyColumn can recycle rows while scrolling a
+                            // ~2000-entry provider. Card surface is split
+                            // across items via the same padding + background
+                            // so the visual card still reads continuous.
+                            item(key = "section_${instance.id}_header") {
+                                Column(
+                                    modifier = Modifier
+                                        .padding(horizontal = 16.dp)
+                                        .padding(top = 6.dp)
+                                        .background(
+                                            MaterialTheme.colorScheme.surfaceContainerHigh,
+                                            RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp),
+                                        ),
+                                ) {
+                                    ProviderSectionHeader(
+                                        instance = instance,
+                                        isCollapsed = false,
+                                        onToggle = {
+                                            collapsedInstanceIds = collapsedInstanceIds + instance.id
+                                        },
+                                    )
+                                }
+                            }
+                            itemsIndexed(
+                                entries,
+                                key = { _, entry -> "entry_${instance.id}_${entry.id}" },
+                            ) { index, entry ->
+                                val isSelected = activeEntryId == entry.id && selectedGroupId == null
+                                val dotColor = providerDotColor(instance.providerType)
+                                val isLast = index == entries.lastIndex
+                                // Last row clips its own bottom so the
+                                // ripple respects the card corners.
+                                val rowShape = if (isLast) {
+                                    RoundedCornerShape(bottomStart = 14.dp, bottomEnd = 14.dp)
                                 } else {
-                                    entries.forEachIndexed { index, entry ->
-                                        val isSelected = activeEntryId == entry.id && selectedGroupId == null
-                                        val dotColor = providerDotColor(instance.providerType)
-                                        // Last row clips its own bottom so the
-                                        // ripple respects the card corners.
-                                        val rowShape = if (index == entries.size - 1) {
-                                            RoundedCornerShape(bottomStart = 14.dp, bottomEnd = 14.dp)
-                                        } else {
-                                            RoundedCornerShape(0.dp)
-                                        }
-                                        Row(
-                                            // T236: expanded entry row —
-                                            // vertical 14→8 + heightIn(min=48dp)
-                                            // for accessible tap target.
+                                    RoundedCornerShape(0.dp)
+                                }
+                                Column(
+                                    modifier = Modifier
+                                        .padding(horizontal = 16.dp)
+                                        .then(if (isLast) Modifier.padding(bottom = 6.dp) else Modifier)
+                                        .background(
+                                            MaterialTheme.colorScheme.surfaceContainerHigh,
+                                            if (isLast) rowShape else RectangleShape,
+                                        ),
+                                ) {
+                                    Row(
+                                        // T236: expanded entry row —
+                                        // vertical 14→8 + heightIn(min=48dp)
+                                        // for accessible tap target.
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(min = 48.dp)
+                                            .clip(rowShape)
+                                            .clickable { onSelectEntry(entry.id) }
+                                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(
+                                            if (isSelected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                            contentDescription = null,
+                                            tint = if (isSelected) Color(0xFF007AFF)
+                                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                                            modifier = Modifier.size(20.dp),
+                                        )
+                                        Spacer(Modifier.width(10.dp))
+                                        Box(
                                             modifier = Modifier
-                                                .fillMaxWidth()
-                                                .heightIn(min = 48.dp)
-                                                .clip(rowShape)
-                                                .clickable { onSelectEntry(entry.id) }
-                                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            Icon(
-                                                if (isSelected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                                                contentDescription = null,
-                                                tint = if (isSelected) Color(0xFF007AFF)
-                                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                                                modifier = Modifier.size(20.dp),
+                                                .size(6.dp)
+                                                .background(dotColor, CircleShape),
+                                        )
+                                        Spacer(Modifier.width(10.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                entry.model.displayName,
+                                                style = MaterialTheme.typography.bodyMedium,
                                             )
-                                            Spacer(Modifier.width(10.dp))
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(6.dp)
-                                                    .background(dotColor, CircleShape),
-                                            )
-                                            Spacer(Modifier.width(10.dp))
-                                            Column(modifier = Modifier.weight(1f)) {
+                                            // [T-android-provider-voice] Modality
+                                            // chips (iOS entryRow badges). FlowRow so
+                                            // an overflow wraps whole chips to the
+                                            // next line instead of squeezing each
+                                            // Text into a vertical letter column.
+                                            FlowRow(
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                itemVerticalAlignment = Alignment.CenterVertically,
+                                            ) {
                                                 Text(
-                                                    entry.model.displayName,
-                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    entry.model.id,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                                 )
-                                                // [T-android-provider-voice] Modality
-                                                // chips (iOS entryRow badges). FlowRow so
-                                                // an overflow wraps whole chips to the
-                                                // next line instead of squeezing each
-                                                // Text into a vertical letter column.
-                                                FlowRow(
-                                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                                    itemVerticalAlignment = Alignment.CenterVertically,
-                                                ) {
-                                                    Text(
-                                                        entry.model.id,
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                                    )
-                                                    com.openminis.app.ui.components.modalityBadges(entry.model).forEach { badge ->
-                                                        com.openminis.app.ui.components.ModalityBadge(badge)
-                                                    }
+                                                com.openminis.app.ui.components.modalityBadges(entry.model).forEach { badge ->
+                                                    com.openminis.app.ui.components.ModalityBadge(badge)
                                                 }
                                             }
-                                            if (selectedGroupId != null && activeEntryId == entry.id) {
-                                                Text(
-                                                    stringResource(R.string.model_picker_active_badge),
-                                                    fontSize = 9.sp,
-                                                    lineHeight = 11.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    color = Color(0xFF34C759),
-                                                    modifier = Modifier
-                                                        .background(
-                                                            Color(0xFF34C759).copy(alpha = 0.1f),
-                                                            RoundedCornerShape(50),
-                                                        )
-                                                        .padding(horizontal = 5.dp, vertical = 1.dp),
-                                                )
-                                            }
-                                            QuickTestButton(onClick = { quickTestEntry = entry })
                                         }
-                                        // Inset hairline between entries.
-                                        if (index < entries.size - 1) {
-                                            HorizontalDivider(
-                                                modifier = Modifier.padding(start = 52.dp, end = 16.dp),
-                                                thickness = 0.5.dp,
-                                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                        if (selectedGroupId != null && activeEntryId == entry.id) {
+                                            Text(
+                                                stringResource(R.string.model_picker_active_badge),
+                                                fontSize = 9.sp,
+                                                lineHeight = 11.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = Color(0xFF34C759),
+                                                modifier = Modifier
+                                                    .background(
+                                                        Color(0xFF34C759).copy(alpha = 0.1f),
+                                                        RoundedCornerShape(50),
+                                                    )
+                                                    .padding(horizontal = 5.dp, vertical = 1.dp),
                                             )
                                         }
+                                        QuickTestButton(onClick = { quickTestEntry = entry })
+                                    }
+                                    // Inset hairline between entries.
+                                    if (!isLast) {
+                                        HorizontalDivider(
+                                            modifier = Modifier.padding(start = 52.dp, end = 16.dp),
+                                            thickness = 0.5.dp,
+                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                        )
                                     }
                                 }
                             }
                         }
                     }
                 }
+
 
                 // ── Empty / No Results ──
                 if (filteredGroups.isEmpty() && allInstancesWithEntries.isEmpty()) {
@@ -1276,6 +1252,72 @@ internal fun ModelPickerSheet(
             )
         }
     }
+}
+
+/**
+ * [T-android-showall-lag] Provider header shared by the collapsed card and
+ * the expanded header item. Extracted so both LazyColumn keys render the
+ * same title + chevron without duplicating the old inline header.
+ *
+ * [T-android-model-picker-polish] Neutral chevron treatment — same as the
+ * group chevron above (tinted container dropped); hairline separates the
+ * provider name from the model rows below.
+ */
+@Composable
+private fun ProviderSectionHeader(
+    instance: ProviderInstance,
+    isCollapsed: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        // T236: tightened provider header padding
+        // (top=10/bottom=8) so the gap to the first
+        // model row reads as ~8dp rather than the
+        // earlier 12dp+row-padding stack.
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            instance.label.ifEmpty { instance.providerType.displayName },
+            // Same rank as the "Model Groups"
+            // header above — see that comment.
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .background(
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
+                    CircleShape,
+                )
+                .clip(CircleShape)
+                .clickable(onClick = onToggle),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                if (isCollapsed) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    // [T-android-model-picker-polish] Hairline under
+    // the provider name. The rows below it are
+    // models, not more provider chrome, and without
+    // a rule the header read as the first list item
+    // — the same separation the group card gets
+    // between its own header and its members.
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp),
+        thickness = 0.5.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+    )
 }
 
 /**

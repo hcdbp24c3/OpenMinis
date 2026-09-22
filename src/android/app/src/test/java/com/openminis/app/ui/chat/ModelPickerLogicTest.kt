@@ -8,8 +8,10 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -50,6 +52,27 @@ class ModelPickerLogicTest {
         runCurrent()
         assertEquals("gpt", result)
         job.cancel()
+    }
+
+    @Test
+    fun `matches contiguous substring case-insensitively`() {
+        assertTrue(matchesModelQuery("DeepSeek-V4-Flash", "deepseek-v4-flash"))
+        assertTrue(matchesModelQuery("deepseek-flash", "DEEPSEEK-FLASH"))
+        assertTrue(matchesModelQuery("gpt-4o-mini", "gpt-4o"))
+    }
+
+    @Test
+    fun `does not match subsequence across interruptions`() {
+        // Kelivo precision: chars-in-order fuzzy must not fire.
+        assertFalse(matchesModelQuery("deepseek-v4-flash", "deepseek-flash"))
+        assertFalse(matchesModelQuery("deepseek-v4-flash", "dseek"))
+        assertFalse(matchesModelQuery("claude-3-opus", "clopus"))
+    }
+
+    @Test
+    fun `blank query matches everything`() {
+        assertTrue(matchesModelQuery("any-model", ""))
+        assertTrue(matchesModelQuery("any-model", "   "))
     }
 
     private fun makeEntry(id: String): ModelEntry =

@@ -1,20 +1,29 @@
 import SwiftUI
 
+extension Notification.Name {
+    /// Posted when the user taps Done on ManageProviderModelsSheet; the host
+    /// clears `showManageModelsSheet` (the sheet body itself cannot call
+    /// `dismiss` without an Environment value injected at init).
+    static let manageModelsSheetDone = Notification.Name("manageModelsSheetDone")
+}
+
 /// [T-ios-manage-provider-models] Sheet listing the FULL model catalog for one
 /// provider with per-row visibility toggles. Opened from the single
 /// "Models (N)" row on ProviderInstanceDetailView (mirrors the Android /
 /// RikkaMinis ManageProviderModelsSheet).
 ///
-/// Search is debounced (250ms) so the ~2000-entry fuzzy filter runs at most
+/// Search is debounced (250ms) so the ~2000-entry precise filter runs at most
 /// once per pause instead of on every keystroke. `List` provides row
-/// virtualization for large catalogs. Tap → edit detail via `onSelectEntry`.
+/// virtualization for large catalogs. Tap → edit detail via `onSelectEntry`
+/// WITHOUT dismissing — the host reopens this sheet after the edit sheet
+/// closes so the user keeps their place in the catalog.
 /// Per-model delete for `isCustom` entries is reachable via the row context
 /// menu (mirrors the old inline trash + confirm). Eye button toggles `isHidden`.
 struct ManageProviderModelsSheet: View {
     let instanceId: String
-    /// Host presents `ModelEntryDetailSheet` when a row is tapped.
+    /// Host presents `ModelEntryDetailSheet` when a row is tapped and is
+    /// responsible for the manage-sheet reopen lifecycle.
     var onSelectEntry: (ModelEntry) -> Void
-    @Environment(\.dismiss) private var dismiss
     @ObservedObject private var store = ProviderConfigStore.shared
 
     @State private var searchText = ""
@@ -67,7 +76,7 @@ struct ManageProviderModelsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(AppLocalized("Done")) { dismiss() }
+                    Button(AppLocalized("Done")) { onSelectDone() }
                 }
             }
         }
@@ -80,6 +89,9 @@ struct ManageProviderModelsSheet: View {
             // most once per pause instead of on every keystroke.
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
+            debouncedSearchText = searchText
+        }
+        .onAppear {
             debouncedSearchText = searchText
         }
         .alert(
@@ -100,6 +112,15 @@ struct ManageProviderModelsSheet: View {
         } message: { entry in
             Text("Are you sure you want to delete \"\(entry.model.displayName)\"? This action cannot be undone.")
         }
+    }
+
+    /// Close via Done: post a notification the host observes (the sheet body
+    /// cannot call `dismiss` without an Environment value injected at init).
+    private func onSelectDone() {
+        NotificationCenter.default.post(
+            name: .manageModelsSheetDone,
+            object: instanceId
+        )
     }
 
     private var searchField: some View {
@@ -158,8 +179,10 @@ struct ManageProviderModelsSheet: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
+            // [T-fix-manage-sheet-reopen] Do not dismiss here — the host
+            // closes this sheet and reopens it after ModelEntryDetail closes,
+            // preserving the search keyword in its own state.
             onSelectEntry(entry)
-            dismiss()
         }
         .contextMenu {
             // Per-model delete stays reachable for custom entries — mirrors the
