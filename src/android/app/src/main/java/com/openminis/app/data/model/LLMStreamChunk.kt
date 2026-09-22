@@ -16,6 +16,18 @@ sealed class LLMStreamChunk {
      *  echoed back on subsequent turns to preserve the model's chain of thought. */
     data class ReasoningContent(val content: String) : LLMStreamChunk()
 
+    /**
+     * [T-android-responses-reasoning-echo] Encrypted reasoning items captured
+     * from a Responses-API `response.completed.output`, for in-memory replay
+     * on the next turn. Mirrors iOS `.reasoningEcho(echo)`.
+     *
+     * Property type is fully qualified: the nested class name would otherwise
+     * shadow the top-level [com.openminis.app.data.model.ReasoningEcho].
+     */
+    data class ReasoningEcho(
+        val echo: com.openminis.app.data.model.ReasoningEcho,
+    ) : LLMStreamChunk()
+
     /** Tool use streaming events */
     data class ToolUseStart(val id: String, val name: String) : LLMStreamChunk()
     data class ToolInputDelta(val id: String, val accumulated: String) : LLMStreamChunk()

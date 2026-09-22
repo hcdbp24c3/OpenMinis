@@ -35,6 +35,7 @@ import com.openminis.app.data.model.LLMModel
 import com.openminis.app.data.model.LLMStreamChunk
 import com.openminis.app.data.model.LLMUsage
 import com.openminis.app.data.model.ModelGroup
+import com.openminis.app.data.model.ReasoningEcho
 import com.openminis.app.data.model.RoutingStrategy
 import com.openminis.app.data.model.hasImageInput
 import com.openminis.app.data.model.ThinkingLevel
@@ -1203,6 +1204,14 @@ class ChatViewModel(
 
     /** Structured agent history for the agent loop (contentParts-based). */
     private val agentHistory = mutableListOf<LLMMessage>()
+
+    /**
+     * [T-android-responses-reasoning-echo] Session-scoped map of
+     * assistant DB row id → captured encrypted reasoning echo. In-memory only
+     * (mirrors iOS: not persisted). Re-attached in [toLLMMessage] when history
+     * is rebuilt from disk within the same process.
+     */
+    private val reasoningEchoByDbId = java.util.concurrent.ConcurrentHashMap<String, ReasoningEcho>()
 
     /**
      * All agent tool definitions, recomputed on each read so the memory
@@ -7767,6 +7776,11 @@ class ChatViewModel(
             // server-emitted value round-trips on the next request — DeepSeek V4
             // emits "" legitimately and fabricated text would be in-context-learned.
             var turnReasoningBlob: String? = null
+            // [T-android-responses-reasoning-echo] Encrypted reasoning echo from
+            // LLMStreamChunk.ReasoningEcho (Responses API). Attached to this
+            // turn's assistant LLMMessage and stashed by dbMessageId so a
+            // toLLMMessage() rebuild can re-attach it for the next request.
+            var turnReasoningEcho: ReasoningEcho? = null
             // T321: capture finish_reason from LLMStreamChunk.Finished so we can
             // log it at turn-end alongside the empty-turn warning.
             var turnFinishReason: String? = null
@@ -8206,6 +8220,12 @@ class ChatViewModel(
                         // the thinking panel is driven by ThinkingDelta events above.
                         turnReasoningBlob = chunk.content
                     }
+                    is LLMStreamChunk.ReasoningEcho -> {
+                        // [T-android-responses-reasoning-echo] Encrypted reasoning
+                        // items from response.completed — stash for this turn's
+                        // assistant message (replayed on the next Responses request).
+                        turnReasoningEcho = chunk.echo
+                    }
                     is LLMStreamChunk.Finished -> {
                         // T321: stash for empty-turn diagnostic logging below.
                         turnFinishReason = chunk.stopReason
@@ -8503,6 +8523,7 @@ class ChatViewModel(
                 content = turnText,
                 contentParts = assistantParts,
                 reasoningContent = turnReasoningContent,
+                reasoningEcho = turnReasoningEcho,
             ))
 
             // T321: empty-turn diagnostic — fires when GPT-5.5 (or any other
@@ -8526,7 +8547,13 @@ class ChatViewModel(
                 }
                 val turnParts = buildTurnParts(allToolBlocks, turnStartBlockIndex, toolInputMap)
                 val blockMeta = allToolBlocks.filter { it.kind == "tool_use" }.associateBy { it.id }
-                persistAssistantTurn(turnParts, lastUsage, turnReasoningContent, blockMeta)
+                val noToolDbId = persistAssistantTurn(turnParts, lastUsage, turnReasoningContent, blockMeta)
+                // [T-android-responses-reasoning-echo] Stash the echo by DB id so
+                // a later toLLMMessage() rebuild (loadSession / reload paths)
+                // re-attaches it for the next request's replay.
+                if (noToolDbId != null && turnReasoningEcho != null) {
+                    reasoningEchoByDbId[noToolDbId] = turnReasoningEcho
+                }
                 // [T-error-persist-android] Empty-response hint: the model ended a
                 // turn (finish=stop/end_turn) with no visible text anywhere in the
                 // reply and no tool blocks — the user just sees a blank bubble.
@@ -8971,6 +8998,11 @@ class ChatViewModel(
                 val lastIdx = agentHistory.indexOfLast { it.role == LLMMessage.Role.ASSISTANT && it.dbMessageId == null }
                 if (lastIdx >= 0) {
                     agentHistory[lastIdx] = agentHistory[lastIdx].copy(dbMessageId = assistantDbId)
+                }
+                // [T-android-responses-reasoning-echo] Session-scoped stash keyed
+                // by DB id — in-memory only (iOS parity: not persisted).
+                if (turnReasoningEcho != null) {
+                    reasoningEchoByDbId[assistantDbId] = turnReasoningEcho
                 }
             }
 
@@ -12290,6 +12322,9 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
             contentParts = contentParts,
             dbMessageId = id,
             reasoningContent = reasoningContent,
+            // [T-android-responses-reasoning-echo] Re-attach the session-stashed
+            // encrypted reasoning so a rebuilt history still replays it.
+            reasoningEcho = if (r == LLMMessage.Role.ASSISTANT) reasoningEchoByDbId[id] else null,
         )
     }
 

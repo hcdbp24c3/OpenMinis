@@ -10,6 +10,7 @@ import com.openminis.app.data.model.LLMModel
 import com.openminis.app.data.model.LLMResponse
 import com.openminis.app.data.model.LLMStreamChunk
 import com.openminis.app.data.model.LLMUsage
+import com.openminis.app.data.model.ReasoningEcho
 import com.openminis.app.data.model.ThinkingLevel
 import com.openminis.app.data.model.hasImageInput
 import com.openminis.app.provider.thinking.ThinkingResolveContext
@@ -179,6 +180,14 @@ class OpenAIProvider private constructor(
          * on the older client). Shared constant so future bumps touch one place.
          */
         private const val CODEX_CLIENT_VERSION = "0.144.1"
+
+        /**
+         * [T-android-responses-reasoning-echo] Provider-family tag for
+         * `ReasoningEcho`. Mirrors iOS `OpenAIAgentProvider.responsesAPIProviderKind`.
+         * Echoes from a different family (or a different model id) are stripped
+         * on replay — encrypted_content is model-specific.
+         */
+        internal const val responsesAPIProviderKind = "openai-responses"
 
         /**
          * [T-android-stale-conn-retry-hang] Streaming time-to-first-byte
@@ -1263,6 +1272,51 @@ class OpenAIProvider private constructor(
                                     "[T321] Responses usage block: $usage"
                                 )
                                 send(LLMStreamChunk.Usage(parseResponsesAPIUsage(usage)))
+                            }
+                            // [T-android-responses-reasoning-echo] Capture native
+                            // reasoning items (id + encrypted_content + summary[])
+                            // for in-memory multi-turn replay. Same-model only —
+                            // cross-model strips happen at replay time (iOS L758-781).
+                            resp?.optJSONArray("output")?.let { out ->
+                                val captured = ArrayList<ReasoningEcho.Item>()
+                                for (i in 0 until out.length()) {
+                                    val item = out.optJSONObject(i) ?: continue
+                                    if (item.optString("type") != "reasoning") continue
+                                    val itemId = item.optString("id", "")
+                                    if (itemId.isEmpty()) continue
+                                    val encrypted = item.optString("encrypted_content", "")
+                                        .takeIf { it.isNotEmpty() }
+                                    val summary = ArrayList<String>()
+                                    val summaryArr = item.optJSONArray("summary")
+                                    if (summaryArr != null) {
+                                        for (j in 0 until summaryArr.length()) {
+                                            val text = summaryArr.optJSONObject(j)
+                                                ?.optString("text", "")?.takeIf { it.isNotEmpty() }
+                                            if (text != null) summary.add(text)
+                                        }
+                                    }
+                                    // Drop items with neither encrypted content nor
+                                    // any summary text — nothing useful to echo.
+                                    if (encrypted == null && summary.isEmpty()) continue
+                                    captured.add(
+                                        ReasoningEcho.Item.OpenAIReasoning(
+                                            id = itemId,
+                                            encryptedContent = encrypted,
+                                            summary = summary,
+                                        ),
+                                    )
+                                }
+                                if (captured.isNotEmpty()) {
+                                    send(
+                                        LLMStreamChunk.ReasoningEcho(
+                                            ReasoningEcho(
+                                                providerKind = responsesAPIProviderKind,
+                                                modelId = model.id,
+                                                items = captured,
+                                            ),
+                                        ),
+                                    )
+                                }
                             }
                         }
                         type == "response.output_text.done" -> {
@@ -3033,6 +3087,41 @@ class OpenAIProvider private constructor(
         for ((msgIndex, msg) in messages.withIndex()) {
             val attachTopLevelImages =
                 msgIndex == lastUserIdx && msg.role == LLMMessage.Role.USER && imageParts.isNotEmpty()
+            // [T-android-responses-reasoning-echo] Replay captured encrypted
+            // reasoning at the HEAD of this assistant turn. Order matters:
+            // Responses API rejects reasoning items that appear after
+            // function_call items of the same turn. Cross-model / cross-family
+            // echoes are stripped (iOS convertMessagesResponsesAPI L1656-1685).
+            if (msg.role == LLMMessage.Role.ASSISTANT) {
+                val echo = msg.reasoningEcho
+                if (echo != null &&
+                    echo.providerKind == responsesAPIProviderKind &&
+                    echo.modelId == model.id
+                ) {
+                    for (item in echo.items) {
+                        if (item is ReasoningEcho.Item.OpenAIReasoning) {
+                            // `summary` is required on input reasoning items even
+                            // when empty (400 "Missing required parameter:
+                            // 'input[N].summary'" otherwise). Always emit an array.
+                            input.put(JSONObject().apply {
+                                put("type", "reasoning")
+                                put("id", item.id)
+                                put("summary", JSONArray().apply {
+                                    for (s in item.summary) {
+                                        put(JSONObject().apply {
+                                            put("type", "summary_text")
+                                            put("text", s)
+                                        })
+                                    }
+                                })
+                                if (!item.encryptedContent.isNullOrEmpty()) {
+                                    put("encrypted_content", item.encryptedContent)
+                                }
+                            })
+                        }
+                    }
+                }
+            }
             if (msg.contentParts.isNotEmpty()) {
                 when (msg.role) {
                     LLMMessage.Role.ASSISTANT -> {
