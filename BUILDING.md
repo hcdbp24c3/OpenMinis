@@ -238,6 +238,14 @@ installation, e.g.
 missing. Rerun `./deps/build_proot.sh` and
 `./scripts/prepare_android_sandbox.sh`, then rebuild.
 
+**Android: terminal throws `PRoot binary not available at .../lib/arm64/libproot.so`**
+— the APK was packaged without `jniLibs/arm64-v8a/libproot.so` (the file is
+gitignored; it is produced by `./deps/build_proot.sh`, or staged by
+`./scripts/prepare_android_sandbox.sh` from the proot asset). Gradle's
+`preBuild` now fails the build when the file is absent. Rerun one of those
+scripts and rebuild; for CI, ensure the workflow checks out submodules and
+runs `deps/build_proot.sh` before `assembleRelease`.
+
 **Android: every command returns `[Shell not running] (exit code: -1)`** —
 the proot ELF loaders are missing from the APK. Check that
 `src/android/app/src/main/jniLibs/arm64-v8a/` contains `libproot-loader.so`

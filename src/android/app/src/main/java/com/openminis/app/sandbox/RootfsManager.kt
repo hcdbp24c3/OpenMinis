@@ -161,12 +161,21 @@ class RootfsManager private constructor(private val context: Context) {
 
     /**
      * Verify PRoot binary is available in the native library directory.
+     *
+     * The binary is NOT extracted here at runtime: Android 10+ W^X allows
+     * exec only from nativeLibraryDir, which the installer populates from
+     * `lib/**/*.so` inside the APK (and which the app cannot write to).
+     * Packaging must therefore include `jniLibs/arm64-v8a/libproot.so` —
+     * see deps/build_proot.sh and scripts/prepare_android_sandbox.sh.
      */
     suspend fun installProotIfNeeded() = withContext(Dispatchers.IO) {
         if (!prootBinary.exists() || !prootBinary.canExecute()) {
             throw IllegalStateException(
-                "PRoot binary not found at $prootBinary. " +
-                "It should be auto-extracted from jniLibs."
+                "PRoot binary not available at $prootBinary " +
+                "(exists=${prootBinary.exists()}, canExecute=${prootBinary.canExecute()}). " +
+                "It must ship in the APK as jniLibs/arm64-v8a/libproot.so so the " +
+                "installer extracts it into nativeLibraryDir. Rebuild after running " +
+                "./deps/build_proot.sh (or ./scripts/prepare_android_sandbox.sh)."
             )
         }
 

@@ -4,6 +4,10 @@
 #   1. Download Alpine Linux aarch64 minirootfs
 #   2. Download PRoot aarch64 static binary from Termux packages
 #   3. Place both into src/android/app/src/main/assets/
+#   4. Stage jniLibs/arm64-v8a/libproot.so from the proot asset when missing
+#      (RootfsManager requires nativeLibraryDir/libproot.so at runtime; the
+#      installer only extracts lib/**/*.so from the APK into that directory,
+#      and Android 10+ W^X makes it the only executable location)
 #
 # Usage: ./scripts/prepare_android_sandbox.sh
 #
@@ -26,6 +30,8 @@ mkdir -p "$ASSETS_DIR"
 
 ROOTFS_FILE="$ASSETS_DIR/alpine-minirootfs.tar.gz"
 PROOT_FILE="$ASSETS_DIR/proot-aarch64"
+JNILIBS_DIR="$PROJECT_ROOT/src/android/app/src/main/jniLibs/arm64-v8a"
+JNILIBS_PROOT="$JNILIBS_DIR/libproot.so"
 
 # --- Alpine rootfs ---
 if [ -f "$ROOTFS_FILE" ]; then
@@ -81,6 +87,44 @@ else
     echo "✓ Extracted PRoot binary: $PROOT_FILE ($(du -h "$PROOT_FILE" | cut -f1))"
 fi
 
+# --- Stage libproot.so into jniLibs (fallback) ---
+# deps/build_proot.sh normally installs BOTH assets/proot-aarch64 and
+# jniLibs/arm64-v8a/libproot.so (the fork build). When that script has not
+# run — CI checkouts, quick local builds — the APK would package the loaders
+# but not proot itself, and RootfsManager.installProotIfNeeded() fails at
+# runtime with "PRoot binary not available at .../lib/arm64/libproot.so".
+# Copy the prepared asset into jniLibs so every Gradle build yields a
+# terminal-capable APK. Never overwrite a fork-built libproot.so.
+mkdir -p "$JNILIBS_DIR"
+if [ -f "$JNILIBS_PROOT" ]; then
+    echo "✓ libproot.so already present: $JNILIBS_PROOT"
+else
+    cp "$PROOT_FILE" "$JNILIBS_PROOT"
+    chmod +x "$JNILIBS_PROOT"
+    echo "✓ Staged jniLibs libproot.so from proot asset: $JNILIBS_PROOT ($(du -h "$JNILIBS_PROOT" | cut -f1))"
+fi
+
+# Fail loudly if we still cannot provide proot as a native library — a
+# green build that omits it produces an APK whose terminal always throws.
+if [ ! -s "$JNILIBS_PROOT" ]; then
+    echo "Error: $JNILIBS_PROOT is missing or empty." >&2
+    echo "Run ./deps/build_proot.sh (preferred) or re-run this script." >&2
+    exit 1
+fi
+
+# Loaders ship with the repo; without them proot launches but every guest
+# execve fails W^X (see deps/build_proot.sh header).
+for loader in libproot-loader.so libproot-loader32.so; do
+    if [ ! -f "$JNILIBS_DIR/$loader" ]; then
+        echo "Warning: $JNILIBS_DIR/$loader is missing." >&2
+        echo "Restore: git checkout -- src/android/app/src/main/jniLibs/arm64-v8a/$loader" >&2
+        echo "Or rerun ./deps/build_proot.sh to verify the full sandbox set." >&2
+    fi
+done
+
 echo ""
 echo "Assets ready in: $ASSETS_DIR"
 ls -lh "$ASSETS_DIR"
+echo ""
+echo "jniLibs ready in: $JNILIBS_DIR"
+ls -lh "$JNILIBS_DIR"

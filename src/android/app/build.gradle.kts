@@ -222,7 +222,36 @@ val stageAndroidSandboxAssets by tasks.registering(Exec::class) {
 }
 tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }
     .configureEach { dependsOn(stageAndroidSandboxAssets) }
-tasks.named("preBuild") { dependsOn(stageAndroidSandboxAssets) }
+tasks.named("preBuild") {
+    dependsOn(stageAndroidSandboxAssets)
+    // [T-android-libproot-guard] libproot.so is gitignored and normally
+    // produced by deps/build_proot.sh (CI) or staged from the proot asset by
+    // scripts/prepare_android_sandbox.sh (local fallback). Gradle packages
+    // jniLibs blindly — a missing file still yields a green build, and the
+    // only symptom is RootfsManager.installProotIfNeeded() throwing
+    // "PRoot binary not found at .../lib/arm64/libproot.so" when the user
+    // opens the terminal. Fail the build instead of shipping that APK.
+    doLast {
+        val libProot = file("src/main/jniLibs/arm64-v8a/libproot.so")
+        if (!libProot.isFile || libProot.length() == 0L) {
+            throw GradleException(
+                "Missing ${libProot.relativeTo(rootProject.projectDir)} — " +
+                    "the terminal will throw at runtime. Fix: run " +
+                    "./deps/build_proot.sh (from the repo root) or " +
+                    "./scripts/prepare_android_sandbox.sh, then rebuild."
+            )
+        }
+        listOf("libproot-loader.so", "libproot-loader32.so").forEach { name ->
+            val loader = libProot.parentFile.resolve(name)
+            if (!loader.isFile) {
+                logger.warn(
+                    "PRoot loader missing: ${loader.relativeTo(rootProject.projectDir)} — " +
+                        "guest execve will fail W^X. Restore from git or rerun deps/build_proot.sh."
+                )
+            }
+        }
+    }
+}
 
 dependencies {
     // Compose BOM
