@@ -1616,10 +1616,6 @@
         <item quantity="one">%d model</item>
         <item quantity="other">%d models</item>
     </plurals>
-    <!-- [T-android-model-list-search] "Models" popup title + trigger row in
-         the model picker (row shows the total non-hidden model count). -->
-    <string name="model_picker_models_label">Models</string>
-    <string name="model_picker_models_row">Models (%1$d)</string>
     <string name="model_picker_modality_image">image</string>
     <string name="model_picker_modality_audio">audio</string>
     <string name="model_picker_modality_video">video</string>
