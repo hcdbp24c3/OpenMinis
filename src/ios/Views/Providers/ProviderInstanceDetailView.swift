@@ -28,10 +28,9 @@ struct ProviderInstanceDetailView: View {
     @State private var editingModelEntry: ModelEntry?
     @State private var pendingDeleteModelEntry: ModelEntry?
     @State private var showKeyRevealed = false
-    /// [T-ios-model-list-search] Search query for the Models section. While
-    /// non-empty the section skips the release-rank re-sort and filters the raw
-    /// entries instead (search results are relevance-filtered, not ranked).
-    @State private var searchText = ""
+    /// [T-ios-manage-provider-models] Presents the full-catalog manage sheet
+    /// from the single "Models (N)" row.
+    @State private var showManageModelsSheet = false
 
     private var instance: ProviderInstance? {
         store.instance(for: instanceId)
@@ -48,7 +47,6 @@ struct ProviderInstanceDetailView: View {
         }
         .navigationTitle(instance?.label ?? "Provider")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $searchText, prompt: "Search models")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -75,6 +73,13 @@ struct ProviderInstanceDetailView: View {
         .sheet(isPresented: $showAddCustomModel) {
             if let instance = instance {
                 AddCustomModelSheet(instanceId: instance.id)
+            }
+        }
+        .sheet(isPresented: $showManageModelsSheet) {
+            if let instance = instance {
+                ManageProviderModelsSheet(instanceId: instance.id) { entry in
+                    editingModelEntry = entry
+                }
             }
         }
         .sheet(item: $editingModelEntry) { entry in
@@ -279,36 +284,44 @@ struct ProviderInstanceDetailView: View {
             )
 
             // MARK: Models
+            // [T-ios-manage-provider-models] Single "Models (N)" row + trailing
+            // refresh — the full catalog (search, visibility, tap-to-edit,
+            // delete) lives in ManageProviderModelsSheet.
             Section {
-                modelListSection(instance)
-            } header: {
                 HStack {
-                    Text("Models")
-                    Spacer()
+                    Button {
+                        showManageModelsSheet = true
+                    } label: {
+                        HStack {
+                            Text("Models (\(store.entries(for: instance.id).count))")
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+
                     // [T-mimo-shadow-voice] Refresh always available now — the
                     // fetch never wipes voice seed entries (replaceEntries
-                    // preserves them), so even a vendor whose /v1/models omits its
-                    // voice models can safely refresh to pull its text models.
-                    do {
-                        Button {
-                            refreshModels(instance)
-                        } label: {
-                            if isFetchingModels {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "arrow.clockwise")
-                                    Text("Refresh")
-                                }
+                    // preserves them), so even a vendor whose /v1/models omits
+                    // its voice models can safely refresh to pull its text models.
+                    Button {
+                        refreshModels(instance)
+                    } label: {
+                        if isFetchingModels {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
                                 .font(.caption)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.secondary.opacity(0.15), in: Capsule())
-                            }
+                                .foregroundStyle(.secondary)
                         }
-                        .disabled(isFetchingModels)
                     }
+                    .disabled(isFetchingModels)
+                    .frame(minWidth: 28, minHeight: 28)
+                    .contentShape(Rectangle())
                 }
             } footer: {
                 VStack(alignment: .leading, spacing: 4) {
@@ -719,164 +732,6 @@ struct ProviderInstanceDetailView: View {
             Text("Manual Token")
         } footer: {
             Text("Use a static bearer token instead of the OAuth sign-in flow. Useful with custom proxy endpoints.")
-        }
-    }
-
-    // MARK: - Model List
-
-    @ViewBuilder
-    private func modelListSection(_ instance: ProviderInstance) -> some View {
-        // [T-ios-model-list-search] Default (no search) keeps the release-rank
-        // order from `entries(for:)`. While a query is active, skip the
-        // expensive rank comparator entirely and filter the raw storage-order
-        // entries — search results are relevance-filtered, not ranked, and the
-        // rank sort would dominate the keystroke path (~44k rank calls for a
-        // 2000-model provider).
-        let entries: [ModelEntry] = searchText.isEmpty
-            ? store.entries(for: instance.id)
-            : store.rawEntries(for: instance.id).filter { entry in
-                fuzzyMatch(query: searchText, text: entry.model.displayName)
-                    || fuzzyMatch(query: searchText, text: entry.model.id)
-            }
-
-        if entries.isEmpty {
-            VStack(spacing: 8) {
-                Text(searchText.isEmpty ? "No models" : "No matching models")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if searchText.isEmpty {
-                    Button {
-                        showAddCustomModel = true
-                    } label: {
-                        Label("Add Custom Model", systemImage: "plus.circle")
-                            .font(.subheadline)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-        }
-
-        ForEach(entries) { entry in
-            modelEntryRow(entry, isHidden: entry.isHidden)
-        }
-    }
-
-    private func modelEntryRow(_ entry: ModelEntry, isHidden: Bool) -> some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 5) {
-                    Text(entry.model.displayName)
-                        .font(.subheadline)
-                        .foregroundStyle(isHidden ? .secondary : .primary)
-                    modalityIcons(for: entry.model)
-                }
-                HStack(spacing: 4) {
-                    Text(entry.model.id)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    if entry.isCustom {
-                        Text("Custom")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.orange)
-                    }
-                }
-            }
-            Spacer()
-            Button {
-                var updated = entry
-                updated.isHidden = !entry.isHidden
-                store.updateEntry(updated)
-            } label: {
-                Image(systemName: entry.isHidden ? "eye.slash" : "eye")
-                    .font(.caption)
-                    .foregroundStyle(entry.isHidden ? .tertiary : .secondary)
-            }
-            .buttonStyle(.plain)
-            .frame(minWidth: 22, minHeight: 22)
-
-            Button {
-                pendingDeleteModelEntry = entry
-            } label: {
-                Image(systemName: "trash")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-            .buttonStyle(.plain)
-            .frame(minWidth: 22, minHeight: 22)
-
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            editingModelEntry = entry
-        }
-        .contextMenu {
-            Button {
-                UIPasteboard.general.string = "entry:\(entry.compositeKey)"
-                MinisToast.show(AppLocalized("Copied: \(entry.model.displayName)"))
-            } label: {
-                Label(AppLocalized("Copy Shortcut Model ID"), systemImage: "link")
-            }
-        }
-    }
-
-    private func modalityIcons(for model: LLMModel) -> some View {
-        let modality = model.modalityOverride ?? model.capabilities.supportedModalities
-        // [T-ios-model-capability-output-tags] (XIN msg 38847) The list only
-        // rendered INPUT modalities (image/pdf/audio/video _input) — output
-        // modalities were never iterated, so a generator like gpt-image-2
-        // (image_output) or an audio_output model showed no capability badge.
-        // Render both directions. Output badges use a "generate"-style glyph
-        // (arrow.up.* / *.badge.plus) + tint so they read distinctly from the
-        // muted input badges. Accessibility labels are localized.
-        return HStack(spacing: 3) {
-            // Input modalities (muted/secondary).
-            if modality.contains(.imageInput) {
-                Image(systemName: "photo")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel(AppLocalized("Image input"))
-            }
-            if modality.contains(.pdfInput) {
-                Image(systemName: "doc")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel(AppLocalized("PDF input"))
-            }
-            if modality.contains(.audioInput) {
-                Image(systemName: "waveform")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel(AppLocalized("Audio input"))
-            }
-            if modality.contains(.videoInput) {
-                Image(systemName: "video")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel(AppLocalized("Video input"))
-            }
-            // Output modalities (tinted, generate-style glyphs).
-            if modality.contains(.imageOutput) {
-                Image(systemName: "photo.badge.plus")
-                    .font(.caption2)
-                    .foregroundStyle(.tint)
-                    .accessibilityLabel(AppLocalized("Image output"))
-            }
-            if modality.contains(.audioOutput) {
-                Image(systemName: "speaker.wave.2")
-                    .font(.caption2)
-                    .foregroundStyle(.tint)
-                    .accessibilityLabel(AppLocalized("Audio output"))
-            }
-            if modality.contains(.videoOutput) {
-                Image(systemName: "video.badge.plus")
-                    .font(.caption2)
-                    .foregroundStyle(.tint)
-                    .accessibilityLabel(AppLocalized("Video output"))
-            }
         }
     }
 
