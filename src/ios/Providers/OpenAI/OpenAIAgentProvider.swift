@@ -756,10 +756,11 @@ final class OpenAIAgentProvider: AgentProvider {
                             // No UI block was created so nothing to fill.
 
                             // Capture native reasoning items (id + encrypted_content
-                            // + summary[]) for in-memory multi-turn replay. These
-                            // are echoed back to the SAME model id only — cross-
-                            // model switches strip them in convertMessagesResponsesAPI.
-                            // See ReasoningEcho for the isolation contract.
+                            // + summary[] + content[].reasoning_text) for in-memory
+                            // multi-turn replay. These are echoed back to the SAME
+                            // model id only — cross-model switches strip them in
+                            // convertMessagesResponsesAPI. See ReasoningEcho for the
+                            // isolation contract.
                             if !reasoningItems.isEmpty {
                                 let captured: [ReasoningEcho.Item] = reasoningItems.compactMap { item in
                                     guard let id = item["id"] as? String else { return nil }
@@ -767,10 +768,21 @@ final class OpenAIAgentProvider: AgentProvider {
                                     let summary: [String] = ((item["summary"] as? [[String: Any]]) ?? []).compactMap { part in
                                         part["text"] as? String
                                     }
-                                    // Drop items with neither encrypted content nor any
-                                    // summary text — nothing useful to echo or display.
-                                    if encrypted == nil && summary.isEmpty { return nil }
-                                    return .openaiReasoning(id: id, encryptedContent: encrypted, summary: summary)
+                                    // Plaintext reasoning blocks — DeepSeek-shaped
+                                    // items carry content[].reasoning_text and no
+                                    // encrypted_content (mirrors Android predicate:
+                                    // type=="reasoning_text" AND non-empty text).
+                                    let reasoningText: [String] = ((item["content"] as? [[String: Any]]) ?? []).compactMap { block in
+                                        guard block["type"] as? String == "reasoning_text",
+                                              let text = block["text"] as? String,
+                                              !text.isEmpty else { return nil }
+                                        return text
+                                    }
+                                    // Drop items with no encrypted content, no summary
+                                    // text, and no plaintext reasoning — nothing useful
+                                    // to echo. Empty-id pre-guard above unchanged.
+                                    if encrypted == nil && summary.isEmpty && reasoningText.isEmpty { return nil }
+                                    return .openaiReasoning(id: id, encryptedContent: encrypted, summary: summary, reasoningText: reasoningText)
                                 }
                                 if !captured.isEmpty {
                                     let echo = ReasoningEcho(
@@ -1653,7 +1665,10 @@ final class OpenAIAgentProvider: AgentProvider {
 
     // MARK: - Responses API Message Conversion
 
-    private func convertMessagesResponsesAPI(_ messages: [AgentMessage]) -> [[String: Any]] {
+    /// Internal (not private) so `@testable import Minis` wire-format tests can
+    /// assert the REAL emitted body — same seam pattern as
+    /// `injectThinkingParams` and Android `buildResponsesAPIBody`.
+    func convertMessagesResponsesAPI(_ messages: [AgentMessage]) -> [[String: Any]] {
         var result: [[String: Any]] = []
         for msg in messages {
             // Replay native reasoning items at the head of this assistant turn.
@@ -1666,7 +1681,7 @@ final class OpenAIAgentProvider: AgentProvider {
                echo.providerKind == Self.responsesAPIProviderKind,
                echo.modelId == self.model.id {
                 for item in echo.items {
-                    if case .openaiReasoning(let id, let encrypted, let summary) = item {
+                    if case .openaiReasoning(let id, let encrypted, let summary, let reasoningText) = item {
                         // `summary` is a required field on input reasoning items
                         // even when empty (server returns
                         //   400 Missing required parameter: 'input[N].summary'
@@ -1679,6 +1694,14 @@ final class OpenAIAgentProvider: AgentProvider {
                         ]
                         if let encrypted, !encrypted.isEmpty {
                             entry["encrypted_content"] = encrypted
+                        }
+                        // DeepSeek-shaped plaintext reasoning: echo
+                        // content[].reasoning_text so the API accepts the
+                        // reasoning item back (400 "The reasoning_text in the
+                        // thinking mode must be passed back"). Omit the key
+                        // entirely when empty — never emit "content":[].
+                        if !reasoningText.isEmpty {
+                            entry["content"] = reasoningText.map { ["type": "reasoning_text", "text": $0] }
                         }
                         result.append(entry)
                     }
