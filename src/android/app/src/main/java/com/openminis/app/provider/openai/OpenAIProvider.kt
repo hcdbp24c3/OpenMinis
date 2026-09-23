@@ -1295,14 +1295,34 @@ class OpenAIProvider private constructor(
                                             if (text != null) summary.add(text)
                                         }
                                     }
-                                    // Drop items with neither encrypted content nor
-                                    // any summary text — nothing useful to echo.
-                                    if (encrypted == null && summary.isEmpty()) continue
+                                    // Plaintext reasoning blocks — DeepSeek-shaped
+                                    // items carry content[].reasoning_text and no
+                                    // encrypted_content (iOS mirrors this predicate).
+                                    val reasoningText = ArrayList<String>()
+                                    val contentArr = item.optJSONArray("content")
+                                    if (contentArr != null) {
+                                        for (j in 0 until contentArr.length()) {
+                                            val block = contentArr.optJSONObject(j)
+                                                ?: continue
+                                            if (block.optString("type") != "reasoning_text") continue
+                                            val text = block.optString("text", "")
+                                            if (text.isNotEmpty()) reasoningText.add(text)
+                                        }
+                                    }
+                                    // Drop items with no encrypted content, no summary
+                                    // text, and no plaintext reasoning — nothing useful
+                                    // to echo.
+                                    if (encrypted == null && summary.isEmpty() &&
+                                        reasoningText.isEmpty()
+                                    ) {
+                                        continue
+                                    }
                                     captured.add(
                                         ReasoningEcho.Item.OpenAIReasoning(
                                             id = itemId,
                                             encryptedContent = encrypted,
                                             summary = summary,
+                                            reasoningText = reasoningText,
                                         ),
                                     )
                                 }

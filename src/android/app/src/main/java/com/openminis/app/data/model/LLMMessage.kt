@@ -104,6 +104,13 @@ data class ReasoningEcho(
             val encryptedContent: String?,
             /** Summary text blocks; empty list still emits `"summary": []`. */
             val summary: List<String>,
+            /**
+             * Plaintext reasoning blocks from `content[]`
+             * (`type=="reasoning_text"`) — DeepSeek-shaped items carry these
+             * instead of `encrypted_content` (hygienic note 3: field name
+             * locked as `reasoningText`; wire name stays `content[]`).
+             */
+            val reasoningText: List<String> = emptyList(),
         ) : Item()
     }
 }
