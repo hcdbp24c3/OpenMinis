@@ -94,9 +94,9 @@ struct ReasoningEcho: @unchecked Sendable {
     enum Item: @unchecked Sendable {
         /// OpenAI Responses API reasoning item.
         /// `reasoningText` — plaintext blocks from `content[]`
-        /// (`type=="reasoning_text"`), DeepSeek-shaped items carry these
-        /// instead of `encrypted_content` (hygienic note 3: field name locked
-        /// as `reasoningText`; wire name stays `content[]`). Default empty for
+        /// (`type=="reasoning_text"`); DeepSeek-shaped items carry these
+        /// instead of `encrypted_content`. Field name is `reasoningText`;
+        /// wire name stays `content[]`. Default empty for
         /// encrypted/summary-only fixtures.
         case openaiReasoning(id: String, encryptedContent: String?, summary: [String], reasoningText: [String] = [])
     }

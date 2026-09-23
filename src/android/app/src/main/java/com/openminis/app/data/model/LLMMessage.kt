@@ -107,8 +107,8 @@ data class ReasoningEcho(
             /**
              * Plaintext reasoning blocks from `content[]`
              * (`type=="reasoning_text"`) — DeepSeek-shaped items carry these
-             * instead of `encrypted_content` (hygienic note 3: field name
-             * locked as `reasoningText`; wire name stays `content[]`).
+             * instead of `encrypted_content`. Field name is `reasoningText`;
+             * the wire name stays `content[]`.
              */
             val reasoningText: List<String> = emptyList(),
         ) : Item()
