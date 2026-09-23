@@ -349,7 +349,7 @@ class SelectionController {
             )
             return
         }
-        val (lo, hi) = wordBoundsAt(text, pos.charOffset)
+        val (lo, hi) = computeWordBounds(text, pos.charOffset)
         if (hi <= lo) {
             beginSelection(pos)
             return
@@ -358,59 +358,6 @@ class SelectionController {
             start = TextPosition(pos.shard, lo),
             end = TextPosition(pos.shard, hi),
         )
-    }
-
-    /**
-     * Compute the word range surrounding [offset] in [text]. Uses
-     * [java.text.BreakIterator.getWordInstance] so the result honors locale
-     * rules. When [offset] sits on whitespace / punctuation, scan outward
-     * for the nearest word so a long-press near a paragraph end / between
-     * two CJK glyphs still produces a non-collapsed selection. Falls back
-     * to "select this single character" when no word can be found nearby,
-     * which still gives the user a visible selection to drag.
-     */
-    private fun wordBoundsAt(text: String, offset: Int): Pair<Int, Int> {
-        if (text.isEmpty()) return 0 to 0
-        val len = text.length
-        val clamped = offset.coerceIn(0, len)
-
-        // Sentence-level selection: long-press should grab a meaningful
-        // chunk of text — for Latin that's a word-ish run, for CJK we
-        // expand to the next punctuation/whitespace boundary on either
-        // side so the user gets a clause-sized selection (matching the
-        // expectation set by other Chinese readers). System TextView's
-        // word-iterator behavior on CJK is too aggressive (single-char
-        // selection) and the resulting near-collapsed highlight isn't
-        // discoverable. Define "sentence stops" as the union of common
-        // Latin + CJK punctuation plus newline.
-        val sentenceStops = setOf(
-            '。', '？', '！', '；', '：', '，', '、',
-            '.', '?', '!', ';', ':', ',',
-            '\n', '\r',
-        )
-        // Scan backward to find the LO bound: the index just after the
-        // nearest preceding sentence stop (or 0 if none).
-        var lo = clamped.coerceAtMost(len - 1).coerceAtLeast(0)
-        while (lo > 0 && text[lo - 1] !in sentenceStops) lo--
-        // Skip leading whitespace inside the sentence so the selection
-        // doesn't begin on a space.
-        while (lo < len && text[lo].isWhitespace()) lo++
-        // Scan forward to find the HI bound: the index of the first
-        // sentence stop at or after the press point (inclusive of the stop
-        // itself so the punctuation is part of the selection — feels more
-        // natural to copy).
-        var hi = clamped.coerceIn(0, len)
-        while (hi < len && text[hi] !in sentenceStops) hi++
-        if (hi < len) hi++ // include the stop character itself
-        // Trim trailing whitespace.
-        while (hi > lo && text[hi - 1].isWhitespace()) hi--
-        if (hi <= lo) {
-            // Degenerate — fall back to a single character so the user
-            // still gets a visible selection to drag.
-            val s = clamped.coerceIn(0, (len - 1).coerceAtLeast(0))
-            return s to (s + 1).coerceAtMost(len)
-        }
-        return lo to hi
     }
 
     /** Extend the active selection's end anchor to [pos] (drag update). */
@@ -1247,4 +1194,58 @@ fun buildTextShard(
     renderedToRawOffset = renderedToRawOffset,
     rawMarkdown = rawMarkdown,
 )
+
+/**
+ * Word range surrounding [offset] in [text] for long-press selection.
+ *
+ * Word-level expansion: stops at whitespace AND punctuation (iOS/kelivo
+ * semantics). Latin text like `"của tôi nè"` selects a single word; CJK
+ * (rarely spaced) still expands to the nearest punctuation clause so the
+ * highlight stays discoverable rather than a single glyph.
+ *
+ * When [offset] sits on whitespace / punctuation, scan outward for the
+ * nearest word so a long-press near a paragraph end / between two CJK
+ * glyphs still produces a non-collapsed selection. Falls back to
+ * "select this single character" when no word can be found nearby.
+ */
+internal fun computeWordBounds(text: String, offset: Int): Pair<Int, Int> {
+    if (text.isEmpty()) return 0 to 0
+    val len = text.length
+    val clamped = offset.coerceIn(0, len)
+    val stops = setOf(
+        '。', '？', '！', '；', '：', '，', '、',
+        '.', '?', '!', ';', ':', ',',
+        '\n', '\r',
+    )
+    fun isStop(c: Char) = c in stops || c.isWhitespace()
+
+    // Land on a word character: prefer scanning left of a stop, else right.
+    var i = clamped.coerceAtMost(len - 1)
+    if (isStop(text[i])) {
+        var left = i
+        while (left >= 0 && isStop(text[left])) left--
+        if (left >= 0) {
+            i = left
+        } else {
+            var right = i
+            while (right < len && isStop(text[right])) right++
+            if (right >= len) {
+                // Degenerate — single character so the user still gets a
+                // visible selection to drag.
+                val s = clamped.coerceIn(0, (len - 1).coerceAtLeast(0))
+                return s to (s + 1).coerceAtMost(len)
+            }
+            i = right
+        }
+    }
+    var lo = i
+    while (lo > 0 && !isStop(text[lo - 1])) lo--
+    var hi = i + 1
+    while (hi < len && !isStop(text[hi])) hi++
+    if (hi <= lo) {
+        val s = clamped.coerceIn(0, (len - 1).coerceAtLeast(0))
+        return s to (s + 1).coerceAtMost(len)
+    }
+    return lo to hi
+}
 

@@ -6,11 +6,10 @@ import org.junit.Test
 /**
  * Long-press selection boundaries for table cells vs prose.
  *
- * A table cell selects in FULL; prose keeps the sentence-level expansion. The
- * distinction matters because most cells are punctuation-free ("Alice Smith"),
- * so the sentence scan happens to grab the whole cell and hides the bug — until
- * a cell contains a comma or a period ("1,200", "v1.2 beta"), where the scan
- * stops mid-cell and the user gets a fragment of the thing they pressed.
+ * A table cell selects in FULL; prose uses word-level expansion (stop at
+ * whitespace + punctuation — kelivo/iOS semantics). Cells with spaces or
+ * punctuation still need the atomic path: prose would only grab "Alice" or
+ * "1" from "Alice Smith" / "1,200".
  */
 class AtomicCellSelectionTest {
 
@@ -22,37 +21,23 @@ class AtomicCellSelectionTest {
         return start to end
     }
 
-    /** Mirrors SelectionController.wordBoundsAt (the prose path). */
-    private fun sentenceBounds(text: String, offset: Int): Pair<Int, Int> {
-        val stops = setOf(
-            '。', '？', '！', '；', '：', '，', '、',
-            '.', '?', '!', ';', ':', ',',
-            '\n', '\r',
-        )
-        if (text.isEmpty()) return 0 to 0
-        val len = text.length
-        val clamped = offset.coerceIn(0, len)
-        var lo = clamped.coerceAtMost(len - 1).coerceAtLeast(0)
-        while (lo > 0 && text[lo - 1] !in stops) lo--
-        while (lo < len && text[lo].isWhitespace()) lo++
-        var hi = clamped.coerceIn(0, len)
-        while (hi < len && text[hi] !in stops) hi++
-        if (hi < len) hi++
-        while (hi > lo && text[hi - 1].isWhitespace()) hi--
-        return lo to hi
-    }
+    /**
+     * Production path: [computeWordBounds] (word-level — whitespace + punctuation).
+     */
+    private fun sentenceBounds(text: String, offset: Int): Pair<Int, Int> =
+        computeWordBounds(text, offset)
 
     private fun select(text: String, bounds: Pair<Int, Int>) =
         text.substring(bounds.first, bounds.second)
 
     @Test
     fun `a cell containing punctuation still selects in full`() {
-        // This is the case the sentence scan gets wrong.
+        // Prose word-scan still stops at the comma; atomic path does not.
         val cell = "1,200"
         assertEquals("1,200", select(cell, atomicBounds(cell)))
         assertEquals(
-            "sentence expansion would stop at the comma",
-            "1,", select(cell, sentenceBounds(cell, 0)),
+            "word expansion stops at the comma",
+            "1", select(cell, sentenceBounds(cell, 0)),
         )
     }
 
@@ -63,16 +48,24 @@ class AtomicCellSelectionTest {
     }
 
     @Test
-    fun `a punctuation-free cell selects in full either way`() {
+    fun `a punctuation-free cell selects in full atomically, one word in prose`() {
         val cell = "Alice Smith"
         assertEquals("Alice Smith", select(cell, atomicBounds(cell)))
-        assertEquals("Alice Smith", select(cell, sentenceBounds(cell, 3)))
+        assertEquals("Alice", select(cell, sentenceBounds(cell, 3)))
     }
 
     @Test
     fun `a CJK cell selects in full`() {
         val cell = "张三，项目经理"
         assertEquals("张三，项目经理", select(cell, atomicBounds(cell)))
+    }
+
+    /** CJK prose still expands to the punctuation clause (no spaces). */
+    @Test
+    fun `CJK prose expands to punctuation clause`() {
+        val cell = "张三，项目经理"
+        assertEquals("张三", select(cell, sentenceBounds(cell, 0)))
+        assertEquals("项目经理", select(cell, sentenceBounds(cell, 3)))
     }
 
     /** Surrounding whitespace is trimmed so the highlight hugs the content. */
@@ -99,10 +92,21 @@ class AtomicCellSelectionTest {
         assertEquals("alpha, beta, gamma", expected)
     }
 
-    /** Prose must NOT become atomic — the sentence behaviour is still wanted. */
+    /**
+     * Prose long-press is WORD-level (kelivo/iOS), not sentence-level.
+     * Regression: Vietnamese "của tôi nè" used to select the whole phrase
+     * because spaces were not stop characters.
+     */
     @Test
-    fun `prose keeps sentence-level expansion`() {
-        val prose = "Hello world. Second sentence here."
-        assertEquals("Hello world.", select(prose, sentenceBounds(prose, 2)))
+    fun `prose keeps word-level expansion on Latin text`() {
+        val vi = "của tôi nè"
+        assertEquals("của", select(vi, sentenceBounds(vi, 0)))
+        assertEquals("tôi", select(vi, sentenceBounds(vi, 5)))
+        assertEquals("nè", select(vi, sentenceBounds(vi, 8)))
+
+        val en = "Hello world. Second sentence here."
+        assertEquals("Hello", select(en, sentenceBounds(en, 2)))
+        assertEquals("world", select(en, sentenceBounds(en, 7)))
+        assertEquals("Second", select(en, sentenceBounds(en, 14)))
     }
 }
