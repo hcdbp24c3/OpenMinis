@@ -133,6 +133,38 @@ class ResponsesReasoningEchoCaptureTest {
         )
     }
 
+    private fun deepSeekCompleted(
+        text: String = "Think through the steps.",
+        id: String = "rs_deepseek1",
+    ): String {
+        // DeepSeek-shaped reasoning item: plaintext content[].reasoning_text,
+        // no encrypted_content, empty summary. Single-line SSE frames only.
+        return (
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"final\"}\n\n" +
+                "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[" +
+                "{\"type\":\"reasoning\",\"id\":\"$id\"," +
+                "\"content\":[{\"type\":\"reasoning_text\",\"text\":\"$text\"}],\"summary\":[]}," +
+                "{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"final\"}]}" +
+                "]},\"sequence_number\":9}\n\n"
+            )
+    }
+
+    @Test
+    fun `content-only reasoning_text item is captured with reasoningText`() {
+        val chunks = responsesChunks(deepSeekCompleted())
+        val echoes = chunks.filterIsInstance<LLMStreamChunk.ReasoningEcho>()
+        assertEquals(
+            "DeepSeek-shaped item must yield a ReasoningEcho; chunks=$chunks",
+            1,
+            echoes.size,
+        )
+        val item = echoes.first().echo.items.single() as ReasoningEcho.Item.OpenAIReasoning
+        assertEquals("rs_deepseek1", item.id)
+        assertEquals(null, item.encryptedContent)
+        assertEquals(emptyList<String>(), item.summary)
+        assertEquals(listOf("Think through the steps."), item.reasoningText)
+    }
+
     @Test
     fun `completed without reasoning items emits no echo`() {
         val chunks = responsesChunks(
