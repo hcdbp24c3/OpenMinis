@@ -239,6 +239,56 @@ class ResponsesReasoningEchoTest {
     }
 
     @Test
+    fun `plaintext reasoningText is replayed as content reasoning_text`() {
+        // DeepSeek-shaped: content[] reasoning_text, no encrypted_content.
+        val history = listOf(
+            LLMMessage(LLMMessage.Role.USER, "why?"),
+            LLMMessage(
+                role = LLMMessage.Role.ASSISTANT,
+                content = "",
+                contentParts = listOf(AgentContentPart.Text("because 42")),
+                reasoningEcho = com.openminis.app.data.model.ReasoningEcho(
+                    providerKind = "openai-responses",
+                    modelId = "gpt-5.5",
+                    items = listOf(
+                        com.openminis.app.data.model.ReasoningEcho.Item.OpenAIReasoning(
+                            id = "rs_plain",
+                            encryptedContent = null,
+                            summary = emptyList(),
+                            reasoningText = listOf("thinking in plaintext"),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val inp = input(bodyOf(provider(), history))
+        val idx = indexOfType(inp, "reasoning")
+        assertTrue("reasoning item must be present; input=$inp", idx >= 0)
+        val item = inp.getJSONObject(idx)
+        assertTrue("content key must be present", item.has("content"))
+        val content = item.getJSONArray("content")
+        assertEquals(1, content.length())
+        val block = content.getJSONObject(0)
+        assertEquals("reasoning_text", block.getString("type"))
+        assertEquals("thinking in plaintext", block.getString("text"))
+    }
+
+    @Test
+    fun `encrypted-only echo omits content key entirely`() {
+        // Locked: no "content":[] for encrypted-only fixtures — empty list
+        // must omit the key, not emit an empty array.
+        val inp = input(bodyOf(provider(), assistantHistoryWithEcho()))
+        val idx = indexOfType(inp, "reasoning")
+        assertTrue("reasoning item must be present", idx >= 0)
+        val item = inp.getJSONObject(idx)
+        assertFalse(
+            "content key must be omitted when reasoningText is empty",
+            item.has("content"),
+        )
+        assertEquals("enc-payload", item.getString("encrypted_content"))
+    }
+
+    @Test
     fun `history without an echo is unchanged`() {
         val history = listOf(
             LLMMessage(LLMMessage.Role.USER, "hi"),
