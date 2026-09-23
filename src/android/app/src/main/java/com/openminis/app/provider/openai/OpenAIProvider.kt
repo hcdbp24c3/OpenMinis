@@ -3137,6 +3137,22 @@ class OpenAIProvider private constructor(
                                 if (!item.encryptedContent.isNullOrEmpty()) {
                                     put("encrypted_content", item.encryptedContent)
                                 }
+                                // DeepSeek-shaped plaintext reasoning: echo
+                                // content[].reasoning_text so the API accepts
+                                // the reasoning item back (400 "The reasoning_text
+                                // in the thinking mode must be passed back").
+                                // Omit the key entirely when empty — never emit
+                                // "content":[].
+                                if (item.reasoningText.isNotEmpty()) {
+                                    put("content", JSONArray().apply {
+                                        for (t in item.reasoningText) {
+                                            put(JSONObject().apply {
+                                                put("type", "reasoning_text")
+                                                put("text", t)
+                                            })
+                                        }
+                                    })
+                                }
                             })
                         }
                     }
