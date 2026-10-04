@@ -1552,6 +1552,8 @@
     <string name="thinking_level_max">极高</string>
     <string name="thinking_level_xhigh">超高</string>
     <string name="thinking_level_ultra">至高</string>
+    <!-- [T-thinking-auto] The endpoint chooses the tier; sends no reasoning_effort at all. -->
+    <string name="thinking_level_auto">自动</string>
     <string name="thinking_level_sheet_title">思考强度</string>
     <string name="model_picker_title">选择模型</string>
     <string name="model_picker_done">完成</string>

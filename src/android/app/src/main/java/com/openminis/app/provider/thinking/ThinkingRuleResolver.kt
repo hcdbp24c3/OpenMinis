@@ -382,6 +382,23 @@ object ThinkingRuleResolver {
             ThinkingWireFormat.ReasoningEffort(ctx.offEffort)
         }
 
+        // [T-thinking-auto] AUTO carries no tier: write none, and strip nothing the
+        // caller already set — the non-destructive half of Kelivo's
+        // `_writeAutoSurfaceFlags`. The surfaces that exist only at their own
+        // emitter are added there: Responses `reasoning.summary:"auto"`
+        // (OpenAIProvider.buildResponsesAPIBody), Anthropic adaptive
+        // `thinking:{type:"adaptive",display:"summarized"}` (AnthropicProvider),
+        // Gemini `thinkingConfig.includeThoughts` (geminiThinkingConfig).
+        if (ctx.level == ThinkingLevel.AUTO) {
+            val emittedForAuto = body.keys().asSequence().toSet() - before
+            return ThinkingResolveTrace(
+                matchedRuleLabel = winner.label,
+                matchedRuleKind = winner.kind,
+                formatSource = "$formatSource+auto",
+                emittedKeys = emittedForAuto.toList(),
+            )
+        }
+
         val clamp = emit(format, ctx, body)
 
         val emitted = body.keys().asSequence().toSet() - before
@@ -629,6 +646,9 @@ object ThinkingRuleResolver {
                     ThinkingLevel.HIGH -> 32768
                     ThinkingLevel.XHIGH, ThinkingLevel.MAX, ThinkingLevel.ULTRA -> 65536
                     ThinkingLevel.OFF -> 0
+                    // [T-thinking-auto] unreachable: `apply` returns before emitting, so
+                    // the qwen branch is never reached with AUTO.
+                    ThinkingLevel.AUTO -> autoHasNoTier("qwenThinkingBudget")
                 }
                 if (budget > 0 && ctx.maxTokens > 0) {
                     if (ctx.maxTokens < 2) {
@@ -770,6 +790,15 @@ object ThinkingRuleResolver {
 
         if (is25FlashLite) return null
 
+        // [T-thinking-auto] AUTO: ask Gemini to return its thoughts and let it pick
+        // the budget/level itself — no `thinkingBudget` / `thinkingLevel` key at all.
+        // Kelivo's `_writeAutoSurfaceFlags` for both Gemini dialects writes exactly
+        // this (put-if-absent `includeThoughts`). Placed after the no-thinking-suffix
+        // guard so a TTS/image model still gets nothing.
+        if (level == ThinkingLevel.AUTO) {
+            return JSONObject().put("includeThoughts", true)
+        }
+
         return when {
             isGemini3 -> JSONObject().apply {
                 if (level == ThinkingLevel.OFF) {
@@ -807,6 +836,8 @@ object ThinkingRuleResolver {
                             ThinkingLevel.MAX, ThinkingLevel.ULTRA,
                             -> "high"
                             ThinkingLevel.OFF -> "low" // unreachable; OFF handled above
+                            // [T-thinking-auto] unreachable: AUTO returned above.
+                            ThinkingLevel.AUTO -> autoHasNoTier("geminiThinkingConfig.level")
                         },
                     )
                     put("includeThoughts", true)
@@ -821,6 +852,8 @@ object ThinkingRuleResolver {
                         ThinkingLevel.MEDIUM -> 8192
                         ThinkingLevel.HIGH -> 16384
                         ThinkingLevel.XHIGH, ThinkingLevel.MAX, ThinkingLevel.ULTRA -> 32768
+                        // [T-thinking-auto] unreachable: AUTO returned above.
+                        ThinkingLevel.AUTO -> autoHasNoTier("geminiThinkingConfig.budget")
                     },
                 )
                 if (level.isEnabled) put("includeThoughts", true)
@@ -834,6 +867,8 @@ object ThinkingRuleResolver {
                         ThinkingLevel.MEDIUM -> 4096
                         ThinkingLevel.HIGH -> 8192
                         ThinkingLevel.XHIGH, ThinkingLevel.MAX, ThinkingLevel.ULTRA -> 16384
+                        // [T-thinking-auto] unreachable: AUTO returned above.
+                        ThinkingLevel.AUTO -> autoHasNoTier("geminiThinkingConfig.budget")
                     },
                 )
                 if (level.isEnabled) put("includeThoughts", true)
@@ -865,6 +900,18 @@ object ThinkingRuleResolver {
     ): Map<String, Any> {
         val adaptive = com.openminis.app.provider.anthropic.AnthropicProvider
             .modelUsesAdaptiveThinking(modelId)
+        // [T-thinking-auto] AUTO: an adaptive model gets summarised thinking with NO
+        // effort (the endpoint picks the depth); a legacy (≤4.5) model gets nothing
+        // at all, because its default is already "no thinking" and there is no tier
+        // we could honestly send. Kelivo's `auto` writes nothing for its budget
+        // dialect for exactly that reason.
+        if (level == ThinkingLevel.AUTO) {
+            // A model that does not reason gets nothing, exactly as for every other
+            // enabled level below: AUTO asks the endpoint to think, it does not
+            // assert that it can.
+            if (supportsReasoning == false) return emptyMap()
+            return if (adaptive) mapOf("adaptive" to true) else emptyMap()
+        }
         if (level.isEnabled && supportsReasoning != false) {
             if (adaptive) {
                 return mapOf(
@@ -899,7 +946,22 @@ object ThinkingRuleResolver {
         // ULTRA is a client-side "Max + orchestration" concept and is NEVER a valid
         // server effort string (iOS b38bf3d5).
         ThinkingLevel.MAX, ThinkingLevel.ULTRA -> "max"
+        // [T-thinking-auto] Unreachable: `apply` short-circuits AUTO before `emit`,
+        // and `geminiThinkingConfig` before its family branches. Loud rather than a
+        // guessed tier, so a future call path that forgets the short-circuit cannot
+        // silently put an unvalidated tier on the wire.
+        ThinkingLevel.AUTO -> autoHasNoTier("wireEffort")
     }
+
+    /**
+     * [T-thinking-auto] Every tier mapper in this file is total over [ThinkingLevel]
+     * because Kotlin requires exhaustive `when` — but [ThinkingLevel.AUTO] never
+     * reaches one: each entry point (`apply`, `geminiThinkingConfig`) returns before
+     * mapping. Failing loudly here keeps "auto means the endpoint chooses" true by
+     * construction instead of by memory.
+     */
+    private fun autoHasNoTier(mapper: String): Nothing =
+        error("ThinkingLevel.AUTO carries no tier; $mapper was reached without the AUTO short-circuit")
 
     /**
      * [T-android-xhigh-effort-clamp] MiMo/Agnes reject xhigh (400/422); their ladder tops

@@ -1457,6 +1457,8 @@
     <string name="thinking_level_max">최대</string>
     <string name="thinking_level_xhigh">매우 높음</string>
     <string name="thinking_level_ultra">울트라</string>
+    <!-- [T-thinking-auto] The endpoint chooses the tier; sends no reasoning_effort at all. -->
+    <string name="thinking_level_auto">자동</string>
     <string name="thinking_level_sheet_title">사고 강도</string>
     <string name="model_picker_title">모델 선택</string>
     <string name="model_picker_done">완료</string>

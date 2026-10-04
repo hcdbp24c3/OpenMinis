@@ -417,10 +417,14 @@ fun SubAgentDetailScreen(agentId: String, onBack: () -> Unit) {
                         ThinkingLevel.MAX -> stringResource(R.string.model_group_detail_thinking_max)
                         ThinkingLevel.ULTRA -> stringResource(R.string.model_group_detail_thinking_ultra)
                         ThinkingLevel.OFF -> stringResource(R.string.model_group_detail_thinking_low)
+                        // [T-thinking-auto] The level that sends no tier.
+                        ThinkingLevel.AUTO -> stringResource(R.string.thinking_level_auto)
                     }
                 }
+                // [T-thinking-auto] `ceiling != OFF`: AUTO ranks below OFF, so it would
+                // otherwise be the only option left for an agent capped at OFF.
                 val cases = ThinkingLevel.entries
-                    .filter { it != ThinkingLevel.OFF && it.rank <= ceiling.rank }
+                    .filter { ceiling != ThinkingLevel.OFF && it != ThinkingLevel.OFF && it.rank <= ceiling.rank }
                     .map { it to labelFor(it) }
                 SettingsCardBlock {
                     Text(

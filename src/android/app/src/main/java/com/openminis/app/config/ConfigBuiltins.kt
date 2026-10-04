@@ -242,6 +242,9 @@ internal object ConfigBuiltins {
         // [T-android-thinking-level-arch] GPT-5.6 higher tiers.
         ThinkingLevel.MAX -> "max"
         ThinkingLevel.ULTRA -> "ultra"
+        // [T-thinking-auto] See GroupsCollection.thinkingLevelToToken: AUTO must
+        // round-trip or it silently degrades to XHIGH on read.
+        ThinkingLevel.AUTO -> "auto"
     }
 
     private fun thinkingLevelFromToken(token: String): ThinkingLevel? = when (token) {
@@ -252,6 +255,7 @@ internal object ConfigBuiltins {
         "xhigh" -> ThinkingLevel.XHIGH
         "max" -> ThinkingLevel.MAX
         "ultra" -> ThinkingLevel.ULTRA
+        "auto" -> ThinkingLevel.AUTO   // [T-thinking-auto]
         else -> null
     }
 

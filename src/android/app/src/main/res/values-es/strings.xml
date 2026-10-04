@@ -1457,6 +1457,8 @@
     <string name="thinking_level_max">Máx.</string>
     <string name="thinking_level_xhigh">Muy alto</string>
     <string name="thinking_level_ultra">Ultra</string>
+    <!-- [T-thinking-auto] The endpoint chooses the tier; sends no reasoning_effort at all. -->
+    <string name="thinking_level_auto">Auto</string>
     <string name="thinking_level_sheet_title">Intensidad de razonamiento</string>
     <string name="model_picker_title">Elegir modelo</string>
     <string name="model_picker_done">Listo</string>

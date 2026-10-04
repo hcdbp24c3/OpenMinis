@@ -2962,6 +2962,11 @@ class ChatViewModel(
     val availableThinkingLevels: List<ThinkingLevel>
         get() {
             val ceiling = currentModelMaxThinkingLevel
+            // [T-thinking-auto] A ceiling of OFF means "this model takes no thinking
+            // level at all". AUTO ranks below OFF (see ThinkingLevel.rank), so without
+            // this guard it would be the one survivor and would resurrect the picker
+            // for a model the user has capped at OFF.
+            if (ceiling == ThinkingLevel.OFF) return emptyList()
             return ThinkingLevel.entries.filter { it != ThinkingLevel.OFF && it.rank <= ceiling.rank }
         }
 

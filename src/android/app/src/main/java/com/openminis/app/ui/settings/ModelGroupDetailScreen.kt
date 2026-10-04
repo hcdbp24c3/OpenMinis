@@ -466,12 +466,15 @@ fun ModelGroupDetailScreen(
                                 ThinkingLevel.MAX -> stringResource(R.string.model_group_detail_thinking_max)
                                 ThinkingLevel.ULTRA -> stringResource(R.string.model_group_detail_thinking_ultra)
                                 ThinkingLevel.OFF -> stringResource(R.string.model_group_detail_thinking_low)
+                                // [T-thinking-auto] The level that sends no tier.
+                                ThinkingLevel.AUTO -> stringResource(R.string.thinking_level_auto)
                             }
                         }
                         // Steps exclude OFF (the toggle above carries OFF
                         // semantics) and everything above the group ceiling.
+                        // [T-thinking-auto] `ceiling != OFF`: see SubAgentsScreen.
                         val cases = ThinkingLevel.entries
-                            .filter { it != ThinkingLevel.OFF && it.rank <= groupMaxThinkingLevel.rank }
+                            .filter { groupMaxThinkingLevel != ThinkingLevel.OFF && it != ThinkingLevel.OFF && it.rank <= groupMaxThinkingLevel.rank }
                             .map { it to labelFor(it) }
                         SettingsCardBlock {
                             Text(

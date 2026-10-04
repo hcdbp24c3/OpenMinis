@@ -1461,6 +1461,8 @@
     <string name="thinking_level_max">最大</string>
     <string name="thinking_level_xhigh">最高</string>
     <string name="thinking_level_ultra">ウルトラ</string>
+    <!-- [T-thinking-auto] The endpoint chooses the tier; sends no reasoning_effort at all. -->
+    <string name="thinking_level_auto">自動</string>
     <string name="thinking_level_sheet_title">思考の強度</string>
     <string name="model_picker_title">モデルを選択</string>
     <string name="model_picker_done">完了</string>

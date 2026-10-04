@@ -3450,6 +3450,20 @@ class OpenAIProvider private constructor(
             // path — so suppress the whole block. Must stay FIRST so it wins over
             // the isOAuth fallback below.
             isMistral -> {}
+            // [T-thinking-auto] AUTO: `summary:"auto"` is the surface flag that makes
+            // the Responses API stream readable reasoning text at all (see
+            // [T-android-codex-thinking-summary] above); `effort` is deliberately
+            // absent so the endpoint picks the depth. `reasoning.effort` is an
+            // optional field, so an object carrying only `summary` is the documented
+            // "auto" shape — Kelivo `_writeAutoSurfaceFlags` writes exactly this.
+            // Must stay ABOVE `isOAuth`: that arm exists to guarantee a reasoning
+            // OBJECT (Codex rejects requests without one), and this branch supplies
+            // one — falling through to it would send `effort:"low"`, i.e. a tier
+            // AUTO explicitly does not choose.
+            thinkingLevel == ThinkingLevel.AUTO -> body.put(
+                "reasoning",
+                JSONObject().put("summary", "auto"),
+            )
             effort != null -> body.put(
                 "reasoning",
                 JSONObject().put("effort", effort).put("summary", "auto"),
@@ -3988,6 +4002,10 @@ class OpenAIProvider private constructor(
         // the Responses/Codex endpoint rejects a literal "ultra"; ultra is a
         // client-side "Max + orchestration" concept only (mirrors iOS).
         ThinkingLevel.MAX, ThinkingLevel.ULTRA -> "max"
+        // [T-thinking-auto] AUTO sends no effort at all — the builder writes the
+        // summary-only reasoning object. Not "off": thinking stays on, the depth is
+        // the endpoint's choice.
+        ThinkingLevel.AUTO -> null
     }
 
     /**

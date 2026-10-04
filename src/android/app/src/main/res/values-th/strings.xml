@@ -1458,6 +1458,8 @@
     <string name="thinking_level_max">สูงสุด</string>
     <string name="thinking_level_xhigh">สูงมาก</string>
     <string name="thinking_level_ultra">อัลตรา</string>
+    <!-- [T-thinking-auto] The endpoint chooses the tier; sends no reasoning_effort at all. -->
+    <string name="thinking_level_auto">อัตโนมัติ</string>
     <string name="thinking_level_sheet_title">ความเข้มข้นของการคิด</string>
     <string name="model_picker_title">เลือกโมเดล</string>
     <string name="model_picker_done">เสร็จสิ้น</string>

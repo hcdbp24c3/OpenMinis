@@ -1459,6 +1459,8 @@
     <string name="thinking_level_max">Maxim</string>
     <string name="thinking_level_xhigh">Foarte ridicat</string>
     <string name="thinking_level_ultra">Ultra</string>
+    <!-- [T-thinking-auto] The endpoint chooses the tier; sends no reasoning_effort at all. -->
+    <string name="thinking_level_auto">Automat</string>
     <string name="thinking_level_sheet_title">Intensitatea gândirii</string>
     <string name="model_picker_title">Alege modelul</string>
     <string name="model_picker_done">Gata</string>

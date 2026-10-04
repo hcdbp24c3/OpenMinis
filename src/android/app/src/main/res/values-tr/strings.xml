@@ -1457,6 +1457,8 @@
     <string name="thinking_level_max">En Yüksek</string>
     <string name="thinking_level_xhigh">Çok Yüksek</string>
     <string name="thinking_level_ultra">Ultra</string>
+    <!-- [T-thinking-auto] The endpoint chooses the tier; sends no reasoning_effort at all. -->
+    <string name="thinking_level_auto">Otomatik</string>
     <string name="thinking_level_sheet_title">Düşünme Yoğunluğu</string>
     <string name="model_picker_title">Model Seç</string>
     <string name="model_picker_done">Bitti</string>

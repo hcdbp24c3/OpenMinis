@@ -224,6 +224,10 @@ class GroupsCollection(
         // [T-android-thinking-level-arch] GPT-5.6 higher tiers.
         ThinkingLevel.MAX -> "max"
         ThinkingLevel.ULTRA -> "ultra"
+        // [T-thinking-auto] Persisted token for "the endpoint chooses". Must round-trip:
+        // an unknown token decodes to null and the caller falls back to XHIGH, which
+        // would silently turn a group configured for AUTO into an explicit tier.
+        ThinkingLevel.AUTO -> "auto"
     }
 
     private fun thinkingLevelFromToken(token: String): ThinkingLevel? = when (token) {
@@ -234,6 +238,7 @@ class GroupsCollection(
         "xhigh" -> ThinkingLevel.XHIGH
         "max" -> ThinkingLevel.MAX
         "ultra" -> ThinkingLevel.ULTRA
+        "auto" -> ThinkingLevel.AUTO   // [T-thinking-auto]
         else -> null
     }
 

@@ -60,6 +60,11 @@ struct ModelGroupDetailView: View {
     /// un-catalogued model contributes nothing to the union.
     private func groupThinkingLevels(_ group: ModelGroup) -> [ThinkingLevel] {
         let ceiling = groupMaxThinkingLevel(group)
+        // [T-thinking-auto] A ceiling of OFF means "no thinking level at all". AUTO
+        // ranks below OFF (see ThinkingLevel.sortRank), so without this it would be the
+        // one survivor of both branches below and would resurrect the picker for a
+        // group the user has capped at OFF.
+        guard ceiling != .off else { return [] }
         let union = Set(group.memberEntryIds.compactMap { store.entry(for: $0) }
             .filter { $0.effectiveMaxThinkingLevel != .off }
             .flatMap { $0.selectableThinkingLevels })

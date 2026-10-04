@@ -1457,6 +1457,8 @@
     <string name="thinking_level_max">Max</string>
     <string name="thinking_level_xhigh">Napakataas</string>
     <string name="thinking_level_ultra">Ultra</string>
+    <!-- [T-thinking-auto] The endpoint chooses the tier; sends no reasoning_effort at all. -->
+    <string name="thinking_level_auto">Awto</string>
     <string name="thinking_level_sheet_title">Lakas ng Pag-iisip</string>
     <string name="model_picker_title">Pumili ng Model</string>
     <string name="model_picker_done">Tapos</string>

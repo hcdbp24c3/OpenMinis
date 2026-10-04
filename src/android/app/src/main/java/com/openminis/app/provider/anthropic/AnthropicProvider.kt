@@ -416,7 +416,22 @@ class AnthropicProvider(
             "[resolve] provider=anthropic model=${model.id} level=${thinkingLevel.name} " +
                 "shape=[${thinkShape.keys.sorted().joinToString(",")}]",
         )
-        if (thinkingLevel.isEnabled) {
+        if (thinkingLevel == ThinkingLevel.AUTO) {
+            // [T-thinking-auto] AUTO: an adaptive model gets summarised thinking with
+            // NO `output_config.effort` — the endpoint picks the depth — and a legacy
+            // (≤4.5) model gets nothing at all, because its default is already "no
+            // thinking" and there is no tier we could honestly send. Mirrors the AUTO
+            // arm of ThinkingRuleResolver.anthropicThinkingShape.
+            if (model.supportsReasoning == false) {
+                // Nothing to ask for: see the same gate in
+                // ThinkingRuleResolver.anthropicThinkingShape.
+            } else if (modelUsesAdaptiveThinking(model.id)) {
+                body.put("thinking", JSONObject().apply {
+                    put("type", "adaptive")
+                    put("display", "summarized")
+                })
+            }
+        } else if (thinkingLevel.isEnabled) {
             if (modelUsesAdaptiveThinking(model.id)) {
                 // [T-anthropic-thinking-display] Explicitly request summarized
                 // thinking. This is the SECOND half of the "thinking on but no
@@ -963,6 +978,13 @@ class AnthropicProvider(
                 ThinkingLevel.XHIGH,
                 ThinkingLevel.MAX,
                 ThinkingLevel.ULTRA -> maxTokens
+                // [T-thinking-auto] Unreachable: the caller (the Anthropic body
+                // builder) and ThinkingRuleResolver.anthropicThinkingShape both
+                // handle AUTO before this. Throwing keeps a future caller from
+                // reading the value as a real budget and sending one.
+                ThinkingLevel.AUTO -> error(
+                    "ThinkingLevel.AUTO carries no budget; it is handled before tier mapping",
+                )
             }
             // Anthropic requires budget_tokens STRICTLY LESS THAN max_tokens; an
             // equal value is a 400 ("thinking.budget_tokens must be less than
@@ -989,6 +1011,12 @@ class AnthropicProvider(
             ThinkingLevel.XHIGH,
             ThinkingLevel.MAX,
             ThinkingLevel.ULTRA -> "max"
+            // [T-thinking-auto] Unreachable — AUTO asks the endpoint for the depth, so
+            // no `output_config.effort` is written at all (see the AUTO arm in the
+            // body builder). Throwing rather than picking a tier keeps that true.
+            ThinkingLevel.AUTO -> error(
+                "ThinkingLevel.AUTO carries no effort; it is handled before tier mapping",
+            )
         }
     }
 

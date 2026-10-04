@@ -1228,6 +1228,8 @@ enum RequestBodyPatcher {
     private static var _thinkingBudget: Int = 0
     private static var _thinkingEffort: String? = nil
     private static var _thinkingDisabled: Bool = false
+    /// [T-thinking-auto] Adaptive-without-effort intent (see setThinkingAdaptiveNoEffort).
+    private static var _thinkingAdaptiveNoEffort: Bool = false
     /// [T-ios-thinking-flag-cross-request] Model the pending `_thinkingDisabled`
     /// intent was computed for; "" means unstamped (legacy callers).
     private static var _thinkingDisabledModelId: String = ""
@@ -1272,6 +1274,15 @@ enum RequestBodyPatcher {
         thinkingLock.unlock()
     }
 
+    /// [T-thinking-auto] Ask for adaptive thinking WITHOUT an effort: the shape AUTO
+    /// uses on Claude 4.6+ — `thinking:{type:"adaptive",display:"summarized"}` and no
+    /// `output_config`, so the endpoint picks the depth.
+    static func setThinkingAdaptiveNoEffort() {
+        thinkingLock.lock()
+        _thinkingAdaptiveNoEffort = true
+        thinkingLock.unlock()
+    }
+
     /// Returns (disabled, modelIdItWasSetFor).
     private static func takeThinkingDisabled() -> (Bool, String) {
         thinkingLock.lock()
@@ -1281,6 +1292,14 @@ enum RequestBodyPatcher {
         _thinkingDisabled = false
         _thinkingDisabledModelId = ""
         return (d, m)
+    }
+
+    private static func takeThinkingAdaptiveNoEffort() -> Bool {
+        thinkingLock.lock()
+        defer { thinkingLock.unlock() }
+        let a = _thinkingAdaptiveNoEffort
+        _thinkingAdaptiveNoEffort = false
+        return a
     }
 
     private static func takeThinkingBudget() -> Int {
@@ -1414,8 +1433,9 @@ enum RequestBodyPatcher {
         let budget = takeThinkingBudget()
         let effort = takeThinkingEffort()
         let (disabledRaw, disabledForModel) = takeThinkingDisabled()
+        let adaptiveNoEffort = takeThinkingAdaptiveNoEffort()
         // Nothing to do if the caller didn't set any thinking intent for this request.
-        guard budget > 0 || effort != nil || disabledRaw else { return }
+        guard budget > 0 || effort != nil || disabledRaw || adaptiveNoEffort else { return }
 
         guard let body = request.httpBody,
               var json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else { return }
@@ -1492,8 +1512,12 @@ enum RequestBodyPatcher {
             // beta header — both were needed.
             json["thinking"] = ["type": "adaptive", "display": "summarized"]
             var oc = (json["output_config"] as? [String: Any]) ?? [:]
-            oc["effort"] = effort ?? "medium"
-            json["output_config"] = oc
+            // [T-thinking-auto] AUTO writes no effort — the endpoint picks the depth —
+            // so `output_config` is left absent instead of defaulting to "medium".
+            if !adaptiveNoEffort {
+                oc["effort"] = effort ?? "medium"
+                json["output_config"] = oc
+            }
             // Strip any legacy budget that may have been left around.
             (json["thinking"] as? [String: Any]).map { _ in
                 if var t = json["thinking"] as? [String: Any] {

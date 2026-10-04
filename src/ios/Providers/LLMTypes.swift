@@ -1054,8 +1054,36 @@ enum ThinkingLevel: String, Codable, Hashable, CaseIterable, Comparable {
     case max
     case ultra
 
+    /// [T-thinking-auto] "Let the endpoint choose" — ported (semantics only, no code)
+    /// from Kelivo's `ReasoningLevel.auto`: the request carries NO tier, only the
+    /// surface flag each vendor needs to RETURN thinking at all (Responses
+    /// `reasoning.summary:"auto"`, Anthropic adaptive
+    /// `thinking:{type:"adaptive",display:"summarized"}`, Gemini
+    /// `thinkingConfig.includeThoughts`), each put-if-absent. Nothing the caller
+    /// already set is stripped.
+    ///
+    /// The point is the tier we do NOT send: every other level is a guess that has to
+    /// be clamped onto the model's declared tiers, and for a model the catalog does not
+    /// describe there is no declared set to clamp onto — the request goes out with a
+    /// tier the endpoint may reject outright or ignore in favour of its own default.
+    ///
+    /// Appended so every persisted raw value keeps decoding; the order it sorts in is
+    /// defined by `sortRank`, not by this position.
+    case auto
+
     static func < (lhs: ThinkingLevel, rhs: ThinkingLevel) -> Bool {
-        allCases.firstIndex(of: lhs)! < allCases.firstIndex(of: rhs)!
+        lhs.sortRank < rhs.sortRank
+    }
+
+    /// Intensity order for clamp and `<=` comparisons.
+    ///
+    /// `.auto` is not an intensity — it asks the endpoint to pick — so it ranks BELOW
+    /// `.off` and can neither be clamped down to a tier nor filtered out of a
+    /// `$0 <= ceiling` picker list. Without this it would inherit the HIGHEST rank by
+    /// being appended last (allCases order), and every `allCases.filter { $0 != .off &&
+    /// $0 <= ceiling }` would silently drop it.
+    var sortRank: Int {
+        self == .auto ? -1 : Self.allCases.firstIndex(of: self)!
     }
 
     var displayName: String {
@@ -1067,6 +1095,7 @@ enum ThinkingLevel: String, Codable, Hashable, CaseIterable, Comparable {
         case .xhigh: return AppLocalized("XHigh")
         case .max: return AppLocalized("Max")
         case .ultra: return AppLocalized("Ultra")
+        case .auto: return AppLocalized("Auto")
         }
     }
 

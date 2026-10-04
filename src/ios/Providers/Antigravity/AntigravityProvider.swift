@@ -250,21 +250,27 @@ final class AntigravityProvider: LLMProvider {
     private func elevatedThinkingConfig(level: ThinkingLevel) -> [String: Any] {
         let id = model.id.lowercased()
         if id.contains("claude") { return [:] }  // Claude uses Anthropic-native thinking
+        // [T-thinking-auto] AUTO: ask for thoughts and let the endpoint choose the
+        // budget/level — no `thinkingBudget` / `thinkingLevel` key at all.
+        if level == .auto { return ["includeThoughts": true] }
         if id.contains("gemini-3") {
             let geminiLevel: String = switch level {
             case .off: "minimal"; case .low: "low"; case .medium: "medium"; case .high, .xhigh, .max, .ultra: "high"
+            case .auto: fatalError("ThinkingLevel.auto carries no tier; raised before the auto short-circuit")
             }
             return ["thinkingLevel": geminiLevel, "includeThoughts": true]
         }
         if id.contains("2.5-pro") {
             let budget: Int = switch level {
             case .off: 128; case .low: 2048; case .medium: 8192; case .high: 16384; case .xhigh, .max, .ultra: 32768
+            case .auto: fatalError("ThinkingLevel.auto carries no budget; raised before the auto short-circuit")
             }
             return ["thinkingBudget": budget, "includeThoughts": true]
         }
         if id.contains("2.5-flash") && !id.contains("lite") {
             let budget: Int = switch level {
             case .off: 0; case .low: 1024; case .medium: 4096; case .high: 8192; case .xhigh, .max, .ultra: 16384
+            case .auto: fatalError("ThinkingLevel.auto carries no budget; raised before the auto short-circuit")
             }
             return ["thinkingBudget": budget, "includeThoughts": true]
         }

@@ -444,6 +444,27 @@ enum ThinkingRuleResolver {
         var clampedTo: String?
         var gateEvents: [ThinkingGateEvent] = []
 
+        // [T-thinking-auto] AUTO carries no tier: write none, and strip nothing the
+        // caller already set — the non-destructive half of Kelivo's
+        // `_writeAutoSurfaceFlags`. The surfaces that live at their own emitter are
+        // added there: Responses `reasoning.summary:"auto"`
+        // (OpenAIAgentProvider), Anthropic adaptive
+        // `thinking:{type:"adaptive",display:"summarized"}` (AnthropicAgentProvider),
+        // Gemini `thinkingConfig.includeThoughts` (geminiThinkingConfig).
+        if ctx.level == .auto {
+            let emittedForAuto = Array(Set(body.keys).subtracting(before))
+            return ThinkingResolveTrace(
+                matchedRuleLabel: winner.label,
+                matchedRuleKind: winner.kind,
+                formatSource: "\(formatSource)+auto",
+                wireFormat: format,
+                emittedKeys: emittedForAuto,
+                clampedFrom: nil,
+                clampedTo: nil,
+                gateEvents: gateEvents
+            )
+        }
+
         if let format {
             let clamp = emit(format: format, ctx: ctx, into: &body, gateEvents: &gateEvents)
             clampedFrom = clamp.from
@@ -752,6 +773,15 @@ enum ThinkingRuleResolver {
     ///   • 2.5 Flash Lite — no thinking.
     ///   • unknown — conservative table with a 128 floor when enabled, so a new model id
     ///               never gets the invalid 0 (the df8a823d fallback).
+    /// [T-thinking-auto] Every tier mapper in this file is total over `ThinkingLevel`
+    /// because Swift requires an exhaustive switch — but `.auto` never reaches one: each
+    /// entry point (`apply`, `geminiThinkingConfig`, `anthropicThinkingShape`) returns
+    /// before mapping. Failing loudly here keeps "auto means the endpoint chooses" true
+    /// by construction instead of by memory.
+    private static func autoHasNoTier(_ mapper: String) -> Never {
+        fatalError("ThinkingLevel.auto carries no tier; \(mapper) was reached without the auto short-circuit")
+    }
+
     static func geminiThinkingConfig(modelId: String, level: ThinkingLevel) -> [String: Any] {
         let id = modelId.lowercased()
 
@@ -774,6 +804,15 @@ enum ThinkingRuleResolver {
             return [:]
         }
 
+        // [T-thinking-auto] AUTO: ask Gemini to return its thoughts and let it pick the
+        // budget/level itself — no `thinkingBudget` / `thinkingLevel` key at all. Same
+        // shape Kelivo's `_writeAutoSurfaceFlags` writes for both Gemini dialects
+        // (put-if-absent `includeThoughts`). After the no-thinking-suffix guard, so a
+        // TTS/image model still gets nothing.
+        if level == .auto {
+            return ["includeThoughts": true]
+        }
+
         if level.isEnabled {
             if id.contains("gemini-3") {
                 let geminiLevel: String = switch level {
@@ -781,6 +820,7 @@ enum ThinkingRuleResolver {
                 case .low: "low"
                 case .medium: "medium"
                 case .high, .xhigh, .max, .ultra: "high"
+                case .auto: autoHasNoTier("geminiThinkingConfig.level")
                 }
                 return ["thinkingLevel": geminiLevel, "includeThoughts": true]
             }
@@ -791,6 +831,7 @@ enum ThinkingRuleResolver {
                 case .medium: 8192
                 case .high: 16384
                 case .xhigh, .max, .ultra: 32768
+                case .auto: autoHasNoTier("geminiThinkingConfig.budget")
                 }
                 return ["thinkingBudget": budget, "includeThoughts": true]
             }
@@ -801,6 +842,7 @@ enum ThinkingRuleResolver {
                 case .medium: 4096
                 case .high: 8192
                 case .xhigh, .max, .ultra: 16384
+                case .auto: autoHasNoTier("geminiThinkingConfig.budget")
                 }
                 return ["thinkingBudget": budget, "includeThoughts": true]
             }
@@ -813,6 +855,7 @@ enum ThinkingRuleResolver {
             case .medium: 4096
             case .high: 8192
             case .xhigh, .max, .ultra: 16384
+            case .auto: autoHasNoTier("geminiThinkingConfig.budget")
             }
             return ["thinkingBudget": budget, "includeThoughts": true]
         }
@@ -868,6 +911,15 @@ enum ThinkingRuleResolver {
         maxTokens: Int
     ) -> [String: Any] {
         let adaptive = AnthropicProvider.modelUsesAdaptiveThinking(modelId)
+        // [T-thinking-auto] AUTO: an adaptive model gets summarised thinking with NO
+        // effort — the endpoint picks the depth — and a legacy (≤4.5) model gets
+        // nothing at all, because its default is already "no thinking" and there is no
+        // tier we could honestly send. Kelivo's `auto` writes nothing for its budget
+        // dialect for exactly that reason.
+        if level == .auto {
+            guard supportsReasoning != false else { return [:] }
+            return adaptive ? ["adaptive": true] : [:]
+        }
         if level.isEnabled, supportsReasoning ?? false {
             if adaptive {
                 return ["effort": AnthropicAgentProvider.thinkingEffort(for: level)]

@@ -112,6 +112,14 @@ final class AnthropicAgentProvider: AgentProvider {
         } else if let budget = thinkShape["budget_tokens"] as? Int {
             RequestBodyPatcher.setThinkingBudget(budget)
             logger.info("Thinking enabled (budget): budget_tokens=\(budget)")
+        } else if thinkShape["adaptive"] != nil {
+            // [T-thinking-auto] AUTO: ask for adaptive thinking and let the endpoint
+            // pick the depth — `thinking:{type:"adaptive",display:"summarized"}` with no
+            // `output_config`. A distinct intent rather than `setThinkingEffort(nil)`,
+            // because that would send no thinking field at all: newer adaptive models
+            // then default `display` to "omitted" and stream an empty thinking block.
+            RequestBodyPatcher.setThinkingAdaptiveNoEffort()
+            logger.info("Thinking enabled (adaptive, endpoint-chosen depth) model=\(self.model.id)")
         } else if thinkShape["disabled"] != nil {
             // Adaptive-generation models (4.6+/5) think by DEFAULT when the
             // request carries no thinking field at all — "off" must be sent
@@ -465,6 +473,9 @@ final class AnthropicAgentProvider: AgentProvider {
         case .medium: 32768
         case .high: min(maxTokens, 65536)
         case .xhigh, .max, .ultra: maxTokens
+        // [T-thinking-auto] Unreachable: AUTO is handled before any budget mapping
+        // (ThinkingRuleResolver.anthropicThinkingShape returns early for it).
+        case .auto: fatalError("ThinkingLevel.auto carries no budget; it is resolved before tier mapping")
         }
         // Anthropic requires budget_tokens < max_tokens (strict inequality).
         let clamped = min(cap, maxTokens)
@@ -486,6 +497,9 @@ final class AnthropicAgentProvider: AgentProvider {
         case .medium: return "medium"
         case .high: return "high"
         case .xhigh, .max, .ultra: return "max"
+        // [T-thinking-auto] Unreachable: AUTO asks the endpoint for the depth, so no
+        // `output_config.effort` is written at all (see setThinkingAdaptiveNoEffort).
+        case .auto: fatalError("ThinkingLevel.auto carries no effort; it is resolved before tier mapping")
         }
     }
 

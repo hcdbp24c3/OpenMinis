@@ -1597,6 +1597,8 @@
     <!-- [T-android-thinking-level-arch] XHigh sits between High and the new Max/Ultra tiers (GPT-5.6). -->
     <string name="thinking_level_xhigh">Vrlo visoko</string>
     <string name="thinking_level_ultra">Ultra</string>
+    <!-- [T-thinking-auto] The endpoint chooses the tier; sends no reasoning_effort at all. -->
+    <string name="thinking_level_auto">Automatski</string>
     <!-- [T-android-thinking-badge-navbar] Title of the thinking-level sheet opened from the navbar badge. -->
     <string name="thinking_level_sheet_title">Intenzitet razmišljanja</string>
     <string name="model_picker_title">Odaberite model</string>

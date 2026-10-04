@@ -356,9 +356,15 @@ extension ModelEntry {
     var selectableThinkingLevels: [ThinkingLevel] {
         let ceiling = effectiveMaxThinkingLevel
         guard ceiling != .off else { return [] }
+        // [T-thinking-auto] AUTO is not an intensity: a ceiling cannot cap it, so it
+        // heads EVERY branch below whenever the model takes any thinking level at all.
+        // It has to be explicit — the branches that build from declared tiers
+        // (`capped`, `above`) never contain it, so leaving it to the `allCases` filter
+        // would offer it for tier-less models only.
+        let auto: [ThinkingLevel] = [.auto]
         let declared = model.selectableThinkingLevels
         guard !declared.isEmpty else {
-            return ThinkingLevel.allCases.filter { $0 != .off && $0 <= ceiling }
+            return auto + ThinkingLevel.allCases.filter { $0 != .off && $0 != .auto && $0 <= ceiling }
         }
         let capped = declared.filter { $0 <= ceiling }
         // [T-thinking-max-unreachable] The ceiling can legitimately sit ABOVE
@@ -370,11 +376,11 @@ extension ModelEntry {
         // floor so a sparse declaration still collapses the tiers BELOW its top
         // (its whole point: one option per distinct wire value).
         if let declaredTop = declared.last, ceiling > declaredTop {
-            let above = ThinkingLevel.allCases.filter { $0 != .off && $0 > declaredTop && $0 <= ceiling }
-            return capped + above
+            let above = ThinkingLevel.allCases.filter { $0 != .off && $0 != .auto && $0 > declaredTop && $0 <= ceiling }
+            return auto + capped + above
         }
         // An override below every declared tier would empty the picker and
         // strand the toggle in an unusable state — keep the weakest tier.
-        return capped.isEmpty ? [declared[0]] : capped
+        return auto + (capped.isEmpty ? [declared[0]] : capped)
     }
 }

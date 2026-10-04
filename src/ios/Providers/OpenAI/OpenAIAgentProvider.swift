@@ -589,6 +589,18 @@ final class OpenAIAgentProvider: AgentProvider {
         if provider.isMistral {
             // No reasoning key, and reasoningRequested stays false so the
             // encrypted-reasoning include below is skipped too.
+        } else if thinkingLevel == .auto {
+            // [T-thinking-auto] AUTO: `summary:"auto"` is the surface flag that makes
+            // the Responses API stream readable reasoning text at all (see the note
+            // below); `effort` is deliberately absent so the endpoint picks the depth.
+            // `reasoning.effort` is optional, so an object carrying only `summary` is
+            // the documented "auto" shape — Kelivo `_writeAutoSurfaceFlags` writes
+            // exactly this. Must stay ABOVE the `isCodexOAuth` fallback below: that arm
+            // exists to guarantee a reasoning OBJECT (Codex rejects requests without
+            // one), and this branch supplies one — falling through would send
+            // `effort:"low"`, i.e. a tier AUTO explicitly does not choose.
+            body["reasoning"] = ["summary": "auto"]
+            reasoningRequested = true
         } else if thinkingLevel.isEnabled, let effort = Self.reasoningEffort(for: model, level: thinkingLevel) {
             // `summary: "auto"` opts in to streaming the human-readable
             // reasoning summary (delivered as `response.reasoning_summary_text.delta`
@@ -1145,6 +1157,10 @@ final class OpenAIAgentProvider: AgentProvider {
         // ultra → "max" here. If/when we implement the orchestration layer it
         // stays a local behavior; the effort string never becomes "ultra".
         case .max, .ultra: "max"
+        // [T-thinking-auto] AUTO sends no effort at all — the Responses builder writes
+        // the summary-only reasoning object. Not "off": thinking stays on, the depth
+        // is the endpoint's choice.
+        case .auto: nil
         }
     }
 
@@ -1253,6 +1269,10 @@ final class OpenAIAgentProvider: AgentProvider {
         case .high: "high"
         case .xhigh: "xhigh"
         case .max, .ultra: "max"
+        // [T-thinking-auto] Unreachable: every caller guards on a concrete level, and
+        // AUTO is handled before this mapping (see the Responses builder and
+        // ThinkingRuleResolver.apply). Loud rather than a guessed tier.
+        case .auto: fatalError("ThinkingLevel.auto carries no tier; wireEffort was reached without the auto short-circuit")
         }
     }
 

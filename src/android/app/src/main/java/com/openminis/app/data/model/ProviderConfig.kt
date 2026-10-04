@@ -133,7 +133,28 @@ enum class ThinkingLevel {
     // Kotlinx Serialization encodes enums by NAME string ("OFF"/"LOW"/...),
     // not declaration-order ordinal, so appending does not corrupt already-
     // persisted data. GPT-5.6 sol/terra reach ULTRA, luna reaches MAX.
-    OFF, LOW, MEDIUM, HIGH, XHIGH, MAX, ULTRA;
+    OFF, LOW, MEDIUM, HIGH, XHIGH, MAX, ULTRA,
+
+    /**
+     * [T-thinking-auto] "Let the endpoint choose." Ported from Kelivo's
+     * `ReasoningLevel.auto` (lib/core/services/api/reasoning/reasoning_dialects.dart):
+     * the request carries NO tier — only the surface flag each vendor needs to
+     * RETURN thinking at all (Responses `reasoning.summary:"auto"`, Anthropic
+     * adaptive `thinking:{type:"adaptive",display:"summarized"}`, Gemini
+     * `thinkingConfig.includeThoughts:true`), each put-if-absent, and nothing the
+     * caller already set is stripped.
+     *
+     * The point is the tier we do NOT send: every other level is a guess that has
+     * to be clamped onto the model's declared tiers, and for a model the catalog
+     * does not describe (a custom relay, a fresh id) there is no declared set to
+     * clamp onto — the request goes out with a tier the endpoint may reject
+     * outright (the MiMo/Ark/xAI 400 class) or silently run at the vendor's
+     * default anyway.
+     *
+     * Appended last: because serialization is by NAME, the position is free, and
+     * appending keeps every existing decoder's declaration order intact.
+     */
+    AUTO;
 
     val isEnabled: Boolean get() = this != OFF
 
@@ -146,11 +167,20 @@ enum class ThinkingLevel {
             XHIGH -> "XHigh"   // was "Max"; the label now belongs to the new MAX case
             MAX -> "Max"
             ULTRA -> "Ultra"
+            AUTO -> "Auto"
         }
 
-    /** Intensity ordinal used for intersection / clamp comparisons —
-     *  follows the enum declaration order. */
-    val rank: Int get() = ordinal
+    /**
+     * Intensity ordinal used for intersection / clamp comparisons — follows the
+     * enum declaration order for every tier.
+     *
+     * [AUTO] is not an intensity: it asks the endpoint to pick, so it ranks BELOW
+     * [OFF] and can neither be clamped down to a tier (`level.rank > ceiling.rank`)
+     * nor filtered out of a `rank <= ceiling.rank` picker list. Without this it
+     * would inherit the highest ordinal by being appended last, and every picker
+     * would silently drop it.
+     */
+    val rank: Int get() = if (this == AUTO) -1 else ordinal
 
     companion object {
         /**
