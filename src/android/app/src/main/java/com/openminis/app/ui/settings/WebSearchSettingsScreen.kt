@@ -22,17 +22,26 @@ import com.openminis.app.R
 import com.openminis.app.tools.WebSearchSettings
 import com.openminis.app.ui.components.DialogTextField
 
+/**
+ * [T-android-web-search] Settings › Web search: which backend `web_search` uses,
+ * and its credentials.
+ *
+ * Ported from tall-1997/OpenMinis-Linux and extended to Kelivo's full provider
+ * set. Engine NAMES come from [WebSearchSettings.Engine.displayName] rather than
+ * one string resource per provider: they are product names ("Tavily", "Kagi",
+ * "You.com"), so translating them would be 26 keys of nothing in 18 locales.
+ *
+ * Keyed backends take a BATCH of keys — one per line, or pasted from a column —
+ * and [com.openminis.app.tools.SearchKeyRotator] rotates them per request. The
+ * list below the field shows each key masked, so a user can see how many are
+ * configured without the screen displaying any of them.
+ */
 @Composable
 fun WebSearchSettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     var engine by remember { mutableStateOf(WebSearchSettings.engine(context)) }
     var searx by remember { mutableStateOf(WebSearchSettings.searxngUrl(context)) }
-    var keys by remember {
-        mutableStateOf(
-            WebSearchSettings.Engine.entries.filter { it.needsKey }
-                .associateWith { WebSearchSettings.apiKey(context, it) },
-        )
-    }
+    var searxAuth by remember { mutableStateOf(WebSearchSettings.searxngAuth(context)) }
     var customUrl by remember { mutableStateOf(WebSearchSettings.customUrl(context)) }
     var customKey by remember { mutableStateOf(WebSearchSettings.customKey(context)) }
     var customHeader by remember { mutableStateOf(WebSearchSettings.customKeyHeader(context)) }
@@ -41,7 +50,7 @@ fun WebSearchSettingsScreen(onBack: () -> Unit) {
 
     BackHandler(enabled = detail != null) { detail = null }
 
-    val title = detail?.let { engineLabel(it) } ?: stringResource(R.string.settings_web_search)
+    val title = detail?.displayName ?: stringResource(R.string.settings_web_search)
 
     SettingsScaffold(
         title = title,
@@ -60,23 +69,9 @@ fun WebSearchSettingsScreen(onBack: () -> Unit) {
                 footer = stringResource(R.string.web_search_engine_footer),
             ) {
                 WebSearchSettings.Engine.entries.forEachIndexed { index, item ->
-                    val configured = when (item) {
-                        WebSearchSettings.Engine.DDG -> true
-                        WebSearchSettings.Engine.SEARXNG -> searx.isNotBlank()
-                        WebSearchSettings.Engine.CUSTOM -> customUrl.isNotBlank()
-                        else -> !keys[item].isNullOrBlank()
-                    }
                     EngineNavRow(
-                        title = engineLabel(item),
-                        subtitle = if (configured) {
-                            if (item == WebSearchSettings.Engine.DDG) {
-                                stringResource(R.string.web_search_no_key_needed)
-                            } else {
-                                stringResource(R.string.web_search_configured)
-                            }
-                        } else {
-                            stringResource(R.string.web_search_not_configured)
-                        },
+                        title = item.displayName,
+                        subtitle = subtitleFor(context, item),
                         selected = engine == item,
                         showDivider = index < WebSearchSettings.Engine.entries.lastIndex,
                         onClick = { detail = item },
@@ -97,7 +92,7 @@ fun WebSearchSettingsScreen(onBack: () -> Unit) {
                 )
             }
         } else {
-            SettingsSection(footer = engineDetailFooter(current)) {
+            SettingsSection(footer = detailFooter(current)) {
                 SettingsSwitchRow(
                     title = stringResource(R.string.web_search_use_engine),
                     checked = engine == current,
@@ -107,11 +102,16 @@ fun WebSearchSettingsScreen(onBack: () -> Unit) {
                             WebSearchSettings.setEngine(context, current)
                         }
                     },
-                    showDivider = current != WebSearchSettings.Engine.DDG,
+                    showDivider = current.needsKey,
                 )
-                when (current) {
-                    WebSearchSettings.Engine.DDG -> { }
-                    WebSearchSettings.Engine.SEARXNG -> CredentialField(
+                if (current.needsKey) {
+                    KeysEditor(current)
+                }
+            }
+
+            when (current) {
+                WebSearchSettings.Engine.SEARXNG -> SettingsSection {
+                    CredentialField(
                         label = stringResource(R.string.web_search_searxng_url),
                         value = searx,
                         placeholder = "https://searx.example/search",
@@ -119,74 +119,116 @@ fun WebSearchSettingsScreen(onBack: () -> Unit) {
                         searx = it
                         WebSearchSettings.setSearxngUrl(context, it)
                     }
-                    WebSearchSettings.Engine.BING,
-                    WebSearchSettings.Engine.TAVILY,
-                    WebSearchSettings.Engine.BOCHA,
-                    WebSearchSettings.Engine.EXA,
-                    WebSearchSettings.Engine.BRAVE,
-                    WebSearchSettings.Engine.JINA,
-                    WebSearchSettings.Engine.ZHIPU,
-                    -> CredentialField(
-                        label = stringResource(R.string.web_search_api_key),
-                        value = keys[current].orEmpty(),
-                        placeholder = stringResource(R.string.web_search_api_key_placeholder),
+                    CredentialField(
+                        label = stringResource(R.string.web_search_searxng_auth),
+                        value = searxAuth,
+                        placeholder = "user:password",
                     ) {
-                        keys = keys + (current to it)
-                        WebSearchSettings.setApiKey(context, current, it)
+                        searxAuth = it
+                        WebSearchSettings.setSearxngAuth(context, it)
                     }
-                    WebSearchSettings.Engine.CUSTOM -> {
-                        CredentialField(
-                            label = stringResource(R.string.web_search_custom_url),
-                            value = customUrl,
-                            placeholder = "https://example.com/search?q={query}",
-                        ) {
-                            customUrl = it
-                            WebSearchSettings.setCustomUrl(context, it)
+                }
+                WebSearchSettings.Engine.CUSTOM -> SettingsSection {
+                    CredentialField(
+                        label = stringResource(R.string.web_search_custom_url),
+                        value = customUrl,
+                        placeholder = "https://example.com/search?q={query}",
+                    ) {
+                        customUrl = it
+                        WebSearchSettings.setCustomUrl(context, it)
+                    }
+                    CredentialField(
+                        label = stringResource(R.string.web_search_custom_key),
+                        value = customKey,
+                        placeholder = stringResource(R.string.web_search_custom_key_placeholder),
+                    ) {
+                        customKey = it
+                        WebSearchSettings.setCustomKey(context, it)
+                    }
+                    CredentialField(
+                        label = stringResource(R.string.web_search_custom_key_header),
+                        value = customHeader,
+                        placeholder = "Authorization",
+                    ) {
+                        customHeader = it
+                        WebSearchSettings.setCustomKeyHeader(context, it)
+                    }
+                }
+                else -> {
+                    // Endpoints the user may point elsewhere (Kelivo exposes the
+                    // same fields): a self-hosted gateway, a proxy, a mirror.
+                    val urlKey = current.urlKey
+                    if (urlKey != null) {
+                        var override by remember(current) {
+                            mutableStateOf(current.urlOverride(context))
                         }
-                        CredentialField(
-                            label = stringResource(R.string.web_search_custom_key),
-                            value = customKey,
-                            placeholder = stringResource(R.string.web_search_custom_key_placeholder),
-                        ) {
-                            customKey = it
-                            WebSearchSettings.setCustomKey(context, it)
-                        }
-                        CredentialField(
-                            label = stringResource(R.string.web_search_custom_key_header),
-                            value = customHeader,
-                            placeholder = "Authorization",
-                        ) {
-                            customHeader = it
-                            WebSearchSettings.setCustomKeyHeader(context, it)
+                        SettingsSection(footer = stringResource(R.string.web_search_url_override_footer)) {
+                            CredentialField(
+                                label = stringResource(R.string.web_search_url_override),
+                                value = override,
+                                placeholder = current.defaultUrl.orEmpty(),
+                            ) {
+                                override = it
+                                WebSearchSettings.setUrlOverride(context, current, it)
+                            }
                         }
                     }
                 }
             }
         }
     }
+
+
 }
 
+/**
+ * [T-android-web-search] Batch key editor: one field, one key per line (or any
+ * whitespace/comma/semicolon), plus the masked list of what is stored.
+ */
 @Composable
-private fun engineLabel(engine: WebSearchSettings.Engine): String = when (engine) {
-    WebSearchSettings.Engine.DDG -> stringResource(R.string.web_search_engine_ddg)
-    WebSearchSettings.Engine.SEARXNG -> stringResource(R.string.web_search_engine_searxng)
-    WebSearchSettings.Engine.BING -> stringResource(R.string.web_search_engine_bing)
-    WebSearchSettings.Engine.TAVILY -> stringResource(R.string.web_search_engine_tavily)
-    WebSearchSettings.Engine.BOCHA -> stringResource(R.string.web_search_engine_bocha)
-    WebSearchSettings.Engine.EXA -> stringResource(R.string.web_search_engine_exa)
-    WebSearchSettings.Engine.BRAVE -> stringResource(R.string.web_search_engine_brave)
-    WebSearchSettings.Engine.JINA -> stringResource(R.string.web_search_engine_jina)
-    WebSearchSettings.Engine.ZHIPU -> stringResource(R.string.web_search_engine_zhipu)
-    WebSearchSettings.Engine.CUSTOM -> stringResource(R.string.web_search_engine_custom)
-}
+private fun KeysEditor(engine: WebSearchSettings.Engine) {
+    val context = LocalContext.current
+    var raw by remember(engine) {
+        mutableStateOf(WebSearchSettings.keys(context, engine).joinToString("\n"))
+    }
+    val stored = remember(raw) { WebSearchSettings.parseKeyBatch(raw) }
 
-@Composable
-private fun engineDetailFooter(engine: WebSearchSettings.Engine): String = when (engine) {
-    WebSearchSettings.Engine.DDG -> stringResource(R.string.web_search_ddg_detail)
-    WebSearchSettings.Engine.SEARXNG -> stringResource(R.string.web_search_searxng_detail)
-    WebSearchSettings.Engine.BING -> stringResource(R.string.web_search_bing_detail)
-    WebSearchSettings.Engine.CUSTOM -> stringResource(R.string.web_search_custom_detail)
-    else -> stringResource(R.string.web_search_keyed_detail, engineLabel(engine))
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Text(
+            stringResource(R.string.web_search_api_keys),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        DialogTextField(
+            value = raw,
+            onValueChange = {
+                raw = it
+                WebSearchSettings.setKeys(context, engine, it)
+            },
+            placeholder = stringResource(R.string.web_search_api_key_placeholder),
+            singleLine = false,
+            maxLines = 6,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp),
+        )
+        if (stored.size > 1) {
+            Text(
+                stringResource(R.string.web_search_keys_rotate, stored.size),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+        stored.forEach { key ->
+            Text(
+                WebSearchSettings.maskKey(key),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+    }
 }
 
 @Composable
@@ -238,4 +280,44 @@ private fun CredentialField(
                 .padding(top = 6.dp),
         )
     }
+}
+
+/**
+ * [T-android-web-search] Configured / not-configured line under an engine row,
+ * and the footer on its detail page. File-level so they can be used from the
+ * list body without being declared after their call site.
+ */
+@Composable
+private fun subtitleFor(context: android.content.Context, item: WebSearchSettings.Engine): String = when {
+    item == WebSearchSettings.Engine.DDG -> stringResource(R.string.web_search_no_key_needed)
+    item == WebSearchSettings.Engine.BING_LOCAL -> stringResource(R.string.web_search_no_key_needed)
+    item == WebSearchSettings.Engine.SEARXNG -> if (WebSearchSettings.searxngUrl(context).isBlank()) {
+        stringResource(R.string.web_search_not_configured)
+    } else {
+        stringResource(R.string.web_search_configured)
+    }
+    item == WebSearchSettings.Engine.CUSTOM -> if (WebSearchSettings.customUrl(context).isBlank()) {
+        stringResource(R.string.web_search_not_configured)
+    } else {
+        stringResource(R.string.web_search_configured)
+    }
+    else -> {
+        val count = WebSearchSettings.keys(context, item).size
+        when {
+            count == 0 -> stringResource(R.string.web_search_not_configured)
+            count == 1 -> stringResource(R.string.web_search_configured)
+            // Multiple keys are the point of the rotation: say how many rather
+            // than hiding the difference behind "Configured".
+            else -> context.getString(R.string.web_search_keys_configured, count)
+        }
+    }
+}
+
+@Composable
+private fun detailFooter(engine: WebSearchSettings.Engine): String = when (engine) {
+    WebSearchSettings.Engine.DDG -> stringResource(R.string.web_search_ddg_detail)
+    WebSearchSettings.Engine.BING_LOCAL -> stringResource(R.string.web_search_bing_local_detail)
+    WebSearchSettings.Engine.SEARXNG -> stringResource(R.string.web_search_searxng_detail)
+    WebSearchSettings.Engine.CUSTOM -> stringResource(R.string.web_search_custom_detail)
+    else -> stringResource(R.string.web_search_keyed_detail, engine.displayName)
 }

@@ -18,14 +18,20 @@ import java.nio.charset.StandardCharsets
  * snippets, instead of opening a browser for a fact.
  *
  * Ported from tall-1997/OpenMinis-Linux (GPL-3, same licence as this repo — see
- * THIRD_PARTY_LICENSES) where the tool was added against the same
- * `AgentToolDefinition` / `ToolExecutionResult` shapes this tree already has.
+ * THIRD_PARTY_LICENSES), then extended to Kelivo's full provider set
+ * (`lib/core/services/search/providers/`, 26 services) minus the one that only
+ * talks to Kelivo's own backend.
  *
- * DuckDuckGo needs no key and is the default, so the tool works out of the box;
- * Settings › Web search offers the keyed backends (Tavily, Bocha, Exa, Brave,
- * Jina, Zhipu, Bing), a self-hosted SearXNG, or a custom endpoint. When the
- * chosen engine returns nothing, the no-key HTML fallbacks (Wikipedia, Bing,
- * Mojeek) run before the call is reported as failed.
+ * Backends live in [WebSearchSettings.Engine]; the no-key ones (DuckDuckGo HTML,
+ * Bing's HTML endpoint) come first so the tool works on a fresh install. Keyed
+ * backends accept SEVERAL keys and rotate them ([SearchKeyRotator]) — Kelivo's
+ * "multiple search" — so a per-key quota is not the ceiling on how much the
+ * agent can search. When the chosen engine returns nothing, the no-key HTML
+ * fallbacks (Wikipedia, Bing, Mojeek) run before the call is reported failed.
+ *
+ * Every engine's request shape and parse route mirrors its Kelivo counterpart:
+ * a vendor that answers one client and rejects the other is the failure this
+ * pairing exists to prevent.
  */
 object WebSearchTool {
     const val NAME = "web_search"
@@ -69,10 +75,10 @@ object WebSearchTool {
             val preferred = context?.let { WebSearchSettings.engine(it) } ?: WebSearchSettings.Engine.DDG
             val allowFallback = context?.let { WebSearchSettings.fallbackEnabled(it) } ?: true
             val engines = mutableListOf(preferred)
-            // A user who picked DuckDuckGo must not silently spend keyed quotas
-            // when it returns nothing. Keyed fallback only runs after a keyed
-            // engine was the one they asked for.
-            if (allowFallback && context != null && preferred != WebSearchSettings.Engine.DDG) {
+            // A user who picked a no-key engine must not silently spend keyed
+            // quotas when it returns nothing. Keyed fallback only runs after a
+            // KEYED engine was the one they asked for.
+            if (allowFallback && context != null && preferred.needsKey) {
                 for (keyed in WebSearchSettings.configuredKeyed(context)) {
                     if (keyed != preferred) engines += keyed
                 }
@@ -125,72 +131,45 @@ object WebSearchTool {
         return try {
             when (engine) {
                 WebSearchSettings.Engine.DDG -> searchDuckDuckGo(query, max, context)
+
+                // [T-android-web-search] Bing's public HTML endpoint: no key, and
+                // the reason "Bing is free" — the paid Web Search API is a
+                // separate engine (BING) for users who have a subscription key.
+                WebSearchSettings.Engine.BING_LOCAL -> {
+                    if (max <= 0) return Attempt(emptyList(), null)
+                    val html = fetchUrl(
+                        "https://www.bing.com/search?q=${enc(query)}&setlang=zh-Hans",
+                        context = context,
+                    ) ?: return Attempt(emptyList(), "empty response from Bing HTML")
+                    val parsed = parseHtmlLinks(
+                        html,
+                        max,
+                        Regex("""<h2>\s*<a[^>]+href="(https?://[^"]+)"[^>]*>(.*?)</a>""", RegexOption.IGNORE_CASE),
+                    )
+                    Attempt(parsed, if (parsed.isEmpty()) "Bing HTML returned no results" else null)
+                }
+
                 WebSearchSettings.Engine.SEARXNG -> {
                     val base = context?.let { WebSearchSettings.searxngUrl(it) }.orEmpty().trimEnd('/')
                     if (base.isEmpty()) return Attempt(emptyList(), "SearXNG URL is not configured")
                     val endpoint = if (base.endsWith("/search")) base else "$base/search"
-                    val body = fetchUrl("$endpoint?q=${enc(query)}&format=json", context = context)
+                    val headers = linkedMapOf<String, String>()
+                    // [T-android-web-search] Kelivo's SearXNG supports an instance
+                    // behind HTTP Basic auth; blank means anonymous.
+                    val auth = context?.let { WebSearchSettings.searxngAuth(it) }.orEmpty()
+                    if (auth.isNotEmpty()) {
+                        val token = android.util.Base64.encodeToString(
+                            auth.toByteArray(StandardCharsets.UTF_8),
+                            android.util.Base64.NO_WRAP,
+                        )
+                        headers["Authorization"] = "Basic $token"
+                    }
+                    val body = fetchUrl("$endpoint?q=${enc(query)}&format=json", headers, context)
                         ?: return Attempt(emptyList(), "empty response from SearXNG")
                     val parsed = parseSearxJson(body, max)
                     Attempt(parsed, if (parsed.isEmpty()) "SearXNG returned no results" else null)
                 }
-                WebSearchSettings.Engine.BING -> keyedGet(
-                    engine, context,
-                    "https://api.bing.microsoft.com/v7.0/search?q=${enc(query)}&count=$max",
-                    headerName = "Ocp-Apim-Subscription-Key",
-                    max = max,
-                    parse = ::parseBingJson,
-                )
-                WebSearchSettings.Engine.TAVILY -> keyedPost(
-                    engine, context,
-                    url = "https://api.tavily.com/search",
-                    body = JSONObject()
-                        .put("query", query)
-                        .put("max_results", max)
-                        .put("search_depth", "basic"),
-                    keyField = "api_key",
-                    max = max,
-                )
-                WebSearchSettings.Engine.BOCHA -> keyedPost(
-                    engine, context,
-                    url = "https://api.bochaai.com/v1/web-search",
-                    body = JSONObject().put("query", query).put("count", max).put("summary", true),
-                    bearer = true,
-                    max = max,
-                )
-                WebSearchSettings.Engine.EXA -> keyedPost(
-                    engine, context,
-                    url = "https://api.exa.ai/search",
-                    body = JSONObject()
-                        .put("query", query)
-                        .put("numResults", max)
-                        .put("contents", JSONObject().put("text", JSONObject().put("maxCharacters", 400))),
-                    headerName = "x-api-key",
-                    max = max,
-                )
-                WebSearchSettings.Engine.BRAVE -> keyedGet(
-                    engine, context,
-                    "https://api.search.brave.com/res/v1/web/search?q=${enc(query)}&count=$max",
-                    headerName = "X-Subscription-Token",
-                    max = max,
-                    parse = { json, n -> parseGenericSearchJson(json, n) },
-                )
-                WebSearchSettings.Engine.JINA -> keyedGet(
-                    engine, context,
-                    "https://s.jina.ai/${enc(query)}",
-                    headerName = "Authorization",
-                    bearer = true,
-                    extra = mapOf("Accept" to "application/json"),
-                    max = max,
-                    parse = { json, n -> parseGenericSearchJson(json, n) },
-                )
-                WebSearchSettings.Engine.ZHIPU -> keyedPost(
-                    engine, context,
-                    url = "https://open.bigmodel.cn/api/paas/v4/web_search",
-                    body = JSONObject().put("search_query", query).put("count", max),
-                    bearer = true,
-                    max = max,
-                )
+
                 WebSearchSettings.Engine.CUSTOM -> {
                     val template = context?.let { WebSearchSettings.customUrl(it) }.orEmpty()
                     if (template.isEmpty()) return Attempt(emptyList(), "Custom search URL is not configured")
@@ -209,7 +188,7 @@ object WebSearchTool {
                         }
                         headers[h] = v
                     }
-                    val body = fetchUrl(endpoint, extraHeaders = headers, context = context)
+                    val body = fetchUrl(endpoint, headers, context)
                         ?: return Attempt(emptyList(), "empty response from custom search")
                     val trimmed = body.trimStart()
                     val parsed = if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
@@ -219,6 +198,248 @@ object WebSearchTool {
                     }
                     Attempt(parsed, if (parsed.isEmpty()) "Custom search returned no results" else null)
                 }
+
+                WebSearchSettings.Engine.TAVILY -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject()
+                        .put("query", query)
+                        .put("max_results", max)
+                        .put("search_depth", "basic"),
+                    keyField = "api_key",
+                    max = max,
+                )
+
+                WebSearchSettings.Engine.BING -> keyedGet(
+                    engine, context,
+                    url = "${engine.resolvedUrl(context)}?q=${enc(query)}&count=$max",
+                    headerName = "Ocp-Apim-Subscription-Key",
+                    max = max,
+                    parse = ::parseBingJson,
+                )
+
+                WebSearchSettings.Engine.BRAVE -> keyedGet(
+                    engine, context,
+                    url = "${engine.resolvedUrl(context)}?q=${enc(query)}&count=$max",
+                    headerName = "X-Subscription-Token",
+                    max = max,
+                    parse = { json, n -> parseGenericSearchJson(json, n) },
+                )
+
+                WebSearchSettings.Engine.EXA -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject()
+                        .put("query", query)
+                        .put("numResults", max)
+                        .put("contents", JSONObject().put("text", JSONObject().put("maxCharacters", 400))),
+                    headerName = "x-api-key",
+                    max = max,
+                )
+
+                WebSearchSettings.Engine.JINA -> keyedGet(
+                    engine, context,
+                    url = if (engine.urlOverride(context).isNotBlank()) {
+                        val base = engine.urlOverride(context).trimEnd('/')
+                        "$base/${enc(query)}"
+                    } else {
+                        "https://s.jina.ai/${enc(query)}"
+                    },
+                    headerName = "Authorization",
+                    bearer = true,
+                    extra = mapOf("Accept" to "application/json"),
+                    max = max,
+                    parse = { json, n -> parseGenericSearchJson(json, n) },
+                )
+
+                WebSearchSettings.Engine.BOCHA -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject().put("query", query).put("count", max).put("summary", true),
+                    bearer = true,
+                    max = max,
+                )
+
+                WebSearchSettings.Engine.ZHIPU -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject().put("search_query", query).put("count", max),
+                    bearer = true,
+                    max = max,
+                )
+
+                WebSearchSettings.Engine.KAGI -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject()
+                        .put("query", query)
+                        .put("workflow", "search")
+                        .put("format", "json")
+                        .put("limit", max),
+                    bearer = true,
+                    max = max,
+                )
+
+                WebSearchSettings.Engine.LINKUP -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject()
+                        .put("q", query)
+                        .put("depth", "standard")
+                        .put("outputType", "sourcedAnswer")
+                        .put("includeImages", "false"),
+                    bearer = true,
+                    max = max,
+                )
+
+                WebSearchSettings.Engine.METASO -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject()
+                        .put("q", query)
+                        .put("scope", "webpage")
+                        .put("size", max)
+                        .put("includeSummary", false),
+                    bearer = true,
+                    max = max,
+                )
+
+                WebSearchSettings.Engine.OLLAMA -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject().put("query", query).put("max_results", max.coerceAtMost(10)),
+                    bearer = true,
+                    max = max,
+                )
+
+                WebSearchSettings.Engine.PARALLEL -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject()
+                        .put("objective", query)
+                        .put("search_queries", JSONArray().put(query))
+                        .put("mode", "basic"),
+                    headerName = "x-api-key",
+                    max = max,
+                )
+
+                WebSearchSettings.Engine.PERPLEXITY -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject().put("query", query).put("max_results", max.coerceAtMost(20)),
+                    bearer = true,
+                    max = max,
+                )
+
+                WebSearchSettings.Engine.QUERIT -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject().put("query", query).put("count", max),
+                    bearer = true,
+                    max = max,
+                )
+
+                WebSearchSettings.Engine.SERPER -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject().put("q", query).put("num", max),
+                    headerName = "X-API-KEY",
+                    max = max,
+                )
+
+                WebSearchSettings.Engine.STEPFUN -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject().put("query", query),
+                    bearer = true,
+                    max = max,
+                )
+
+                WebSearchSettings.Engine.TINYFISH -> keyedGet(
+                    engine, context,
+                    url = "${engine.resolvedUrl(context).trimEnd('/')}?query=${enc(query)}&num=$max",
+                    headerName = "X-API-Key",
+                    max = max,
+                    parse = { json, n -> parseGenericSearchJson(json, n) },
+                )
+
+                WebSearchSettings.Engine.YOU -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject().put("query", query).put("count", max),
+                    headerName = "X-API-Key",
+                    max = max,
+                )
+
+                WebSearchSettings.Engine.FIRECRAWL -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject()
+                        .put("query", query)
+                        .put("limit", max.coerceIn(1, 100))
+                        .put("sources", JSONArray().put("web").put("news")),
+                    bearer = true,
+                    max = max,
+                )
+
+                WebSearchSettings.Engine.ANYSEARCH -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject()
+                        .put("query", query)
+                        .put("max_results", max.coerceAtMost(20))
+                        .put("format", "json"),
+                    bearer = true,
+                    max = max,
+                )
+
+                // Vendor-specific shapes: Doubao's PascalCase envelope, Kimi's
+                // tools endpoints with chunked text, Grok's Responses-API answer
+                // plus url_citation annotations.
+                WebSearchSettings.Engine.DOUBAO -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject()
+                        .put("Query", query)
+                        .put("SearchType", "web")
+                        .put("Count", max)
+                        .put("Filter", JSONObject().put("NeedUrl", true)),
+                    bearer = true,
+                    max = max,
+                    parse = ::parseDoubaoJson,
+                )
+
+                WebSearchSettings.Engine.KIMI -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject()
+                        .put("text_query", query)
+                        .put("limit", max.coerceAtMost(20))
+                        .put("timeout_seconds", 30),
+                    bearer = true,
+                    max = max,
+                    parse = ::parseKimiJson,
+                )
+
+                WebSearchSettings.Engine.GROK -> keyedPost(
+                    engine, context,
+                    url = engine.resolvedUrl(context),
+                    body = JSONObject()
+                        .put("model", "grok-4.5")
+                        .put(
+                            "input",
+                            JSONArray()
+                                .put(JSONObject().put("role", "system").put("content", GROK_SYSTEM_PROMPT))
+                                .put(JSONObject().put("role", "user").put("content", query)),
+                        )
+                        .put("tools", JSONArray().put(JSONObject().put("type", "web_search")))
+                        .put("store", false)
+                        .put("stream", false)
+                        .put("reasoning", JSONObject().put("effort", "low")),
+                    bearer = true,
+                    max = max,
+                    parse = ::parseGrokJson,
+                )
             }
         } catch (e: Exception) {
             Attempt(emptyList(), e.message ?: engine.id)
@@ -235,12 +456,12 @@ object WebSearchTool {
         bearer: Boolean = false,
         extra: Map<String, String> = emptyMap(),
     ): Attempt {
-        val key = context?.let { WebSearchSettings.apiKey(it, engine) }.orEmpty()
+        val key = SearchKeyRotator.select(context, engine)
         if (key.isEmpty()) return Attempt(emptyList(), "${engine.id} API key is not configured")
         val headers = linkedMapOf("Accept" to "application/json")
         headers.putAll(extra)
         headers[headerName] = if (bearer && !key.startsWith("Bearer ", ignoreCase = true)) "Bearer $key" else key
-        val body = fetchUrl(url, extraHeaders = headers, context = context)
+        val body = fetchUrl(url, headers, context)
             ?: return Attempt(emptyList(), "empty response from ${engine.id}")
         val parsed = parse(body, max)
         return Attempt(parsed, if (parsed.isEmpty()) "${engine.id} returned no results" else null)
@@ -255,8 +476,9 @@ object WebSearchTool {
         keyField: String? = null,
         headerName: String? = null,
         bearer: Boolean = false,
+        parse: (String, Int) -> List<Result> = ::parseGenericSearchJson,
     ): Attempt {
-        val key = context?.let { WebSearchSettings.apiKey(it, engine) }.orEmpty()
+        val key = SearchKeyRotator.select(context, engine)
         if (key.isEmpty()) return Attempt(emptyList(), "${engine.id} API key is not configured")
         if (keyField != null) body.put(keyField, key)
         val headers = linkedMapOf(
@@ -267,9 +489,93 @@ object WebSearchTool {
         if (bearer) headers["Authorization"] = if (key.startsWith("Bearer ", ignoreCase = true)) key else "Bearer $key"
         val raw = postJson(url, body.toString(), headers, context)
             ?: return Attempt(emptyList(), "empty response from ${engine.id}")
-        val parsed = parseGenericSearchJson(raw, max)
+        val parsed = parse(raw, max)
         return Attempt(parsed, if (parsed.isEmpty()) "${engine.id} returned no results" else null)
     }
+
+    // ── Kelivo provider parsers ─────────────────────────────────────────────
+
+    /** Doubao answers `{Result:{WebResults:[{Title,Url,Summary|Content|Snippet}]}}`. */
+    internal fun parseDoubaoJson(json: String, max: Int = MAX_RESULTS): List<Result> {
+        val out = ArrayList<Result>(max)
+        val root = JSONObject(json)
+        val metadata = root.optJSONObject("ResponseMetadata")
+        val error = metadata?.optJSONObject("Error")
+        if (error != null) {
+            throw IllegalStateException(error.optString("Message").ifBlank { error.optString("Code") })
+        }
+        val arr = root.optJSONObject("Result")?.optJSONArray("WebResults") ?: return out
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val url = o.optString("Url").trim()
+            if (url.isEmpty()) continue
+            val snippet = o.optString("Summary").trim()
+                .ifBlank { o.optString("Content").trim() }
+                .ifBlank { o.optString("Snippet").trim() }
+            out += Result(o.optString("Title").trim(), url, snippet)
+            if (out.size >= max) break
+        }
+        return out
+    }
+
+    /** Kimi answers `{search_results:[{title,url,chunks:[{text}]}]}`. */
+    internal fun parseKimiJson(json: String, max: Int = MAX_RESULTS): List<Result> {
+        val out = ArrayList<Result>(max)
+        val arr = JSONObject(json).optJSONArray("search_results") ?: return out
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val url = o.optString("url").trim()
+            if (url.isEmpty()) continue
+            val chunks = o.optJSONArray("chunks")
+            val text = buildString {
+                if (chunks != null) {
+                    for (c in 0 until chunks.length()) {
+                        val t = chunks.optJSONObject(c)?.optString("text").orEmpty().trim()
+                        if (t.isEmpty()) continue
+                        if (isNotEmpty()) append("\n\n")
+                        append(t)
+                    }
+                }
+            }
+            out += Result(o.optString("title").trim(), url, text.ifBlank { o.optString("snippet").trim() })
+            if (out.size >= max) break
+        }
+        return out
+    }
+
+    /**
+     * Grok (xAI Responses API) answers with the model's text plus
+     * `url_citation` annotations. The answer itself is not a search result, so
+     * only the citations become results — that is what the caller can follow.
+     */
+    internal fun parseGrokJson(json: String, max: Int = MAX_RESULTS): List<Result> {
+        val out = ArrayList<Result>(max)
+        val seen = HashSet<String>()
+        val output = JSONObject(json).optJSONArray("output") ?: return out
+        for (i in 0 until output.length()) {
+            val item = output.optJSONObject(i) ?: continue
+            val content = item.optJSONArray("content") ?: continue
+            for (c in 0 until content.length()) {
+                val block = content.optJSONObject(c) ?: continue
+                val annotations = block.optJSONArray("annotations") ?: continue
+                for (a in 0 until annotations.length()) {
+                    val ann = annotations.optJSONObject(a) ?: continue
+                    if (ann.optString("type") != "url_citation") continue
+                    val url = ann.optString("url").trim()
+                    if (url.isEmpty() || !seen.add(url)) continue
+                    val title = ann.optString("title").trim().ifBlank { url }
+                    out += Result(title, url, "")
+                    if (out.size >= max) return out
+                }
+            }
+        }
+        return out
+    }
+
+    private const val GROK_SYSTEM_PROMPT =
+        "You are a search assistant. Answer with the facts you retrieved and cite them."
+
+    // ── Generic parsers ────────────────────────────────────────────────────
 
     internal fun parseSearxJson(json: String, max: Int = MAX_RESULTS): List<Result> {
         val out = ArrayList<Result>(max)
@@ -317,39 +623,63 @@ object WebSearchTool {
         return url
     }
 
+    /**
+     * [T-android-web-search] Walk an arbitrary provider payload for hit arrays.
+     *
+     * Deliberately a MERGE, not a first-match: Kelivo's You and Firecrawl services
+     * both publish `results.web` AND `results.news` (or `data.web` + `data.news`)
+     * and their clients show both, so stopping at the first non-empty array would
+     * silently drop half of every answer. Results are deduplicated by URL in
+     * encounter order, which also keeps `sources`/`references` duplicates out.
+     *
+     * No early searx/bing short-circuit here: those parsers only read their own
+     * snippet field, so letting them win would have thrown away a provider's
+     * `excerpts`/`markdown` text before [parseResultArray] saw it.
+     */
     internal fun parseGenericSearchJson(json: String, max: Int): List<Result> {
         val trimmed = json.trim()
         if (trimmed.startsWith("[")) {
             return parseResultArray(JSONArray(trimmed), max)
         }
-        val fromSearx = parseSearxJson(json, max)
-        if (fromSearx.isNotEmpty()) return fromSearx
-        val fromBing = parseBingJson(json, max)
-        if (fromBing.isNotEmpty()) return fromBing
-        return findResultArray(JSONObject(json), max, depth = 0).orEmpty()
+        val merged = LinkedHashMap<String, Result>()
+        collectResults(JSONObject(json), max, depth = 0, into = merged)
+        return merged.values.toList()
     }
 
-    private val RESULT_KEYS = arrayOf(
-        "results", "items", "data", "organic", "organic_results",
-        "webPages", "web", "search_result", "value",
-    )
-
-    /** Bocha nests hits at data.webPages.value; one flat pass misses that. */
-    private fun findResultArray(node: JSONObject, max: Int, depth: Int): List<Result>? {
-        if (depth > 3) return null
+    private fun collectResults(
+        node: JSONObject,
+        max: Int,
+        depth: Int,
+        into: MutableMap<String, Result>,
+    ) {
+        if (into.size >= max || depth > 4) return
         for (key in RESULT_KEYS) {
-            node.optJSONArray(key)?.let { arr ->
-                val parsed = parseResultArray(arr, max)
-                if (parsed.isNotEmpty()) return parsed
+            val arr = node.optJSONArray(key) ?: continue
+            for (result in parseResultArray(arr, max)) {
+                if (into.size >= max) return
+                into.putIfAbsent(result.url, result)
             }
         }
-        if (depth == 3) return null
         for (key in RESULT_KEYS) {
             val child = node.optJSONObject(key) ?: continue
-            findResultArray(child, max, depth + 1)?.let { return it }
+            collectResults(child, max, depth + 1, into)
+            if (into.size >= max) return
         }
-        return null
     }
+
+    /**
+     * [T-android-web-search] Hit-array keys seen across the provider set:
+     * Kelivo's `results`/`items`/`data`/`organic`/`webPages`/`value` plus the
+     * ones its extra services use — Kagi's `data.search`, Metaso's `webpages`,
+     * LinkUp's `sources`, Querit's `results.result`, You/Firecrawl's
+     * `results.web` + `news`.
+     */
+    private val RESULT_KEYS = arrayOf(
+        "results", "items", "data", "organic", "organic_results",
+        "webPages", "web", "news", "search_result", "value", "sources",
+        "webpages", "search", "result", "references", "citations",
+    )
+
 
     private fun parseResultArray(arr: JSONArray, max: Int): List<Result> {
         val out = ArrayList<Result>(max)
@@ -357,13 +687,23 @@ object WebSearchTool {
             val o = arr.optJSONObject(i) ?: continue
             val url = o.optString("url").ifBlank { o.optString("link") }
                 .ifBlank { o.optString("href") }
-                .ifBlank { o.optString("displayUrl") }.trim()
-            val title = o.optString("title").ifBlank { o.optString("name") }.trim()
+                .ifBlank { o.optString("displayUrl") }
+                .ifBlank { o.optString("Url") }.trim()
+            val title = o.optString("title").ifBlank { o.optString("name") }
+                .ifBlank { o.optString("Title") }.trim()
             if (url.isBlank() || title.isBlank()) continue
             val snippet = o.optString("snippet").ifBlank { o.optString("content") }
                 .ifBlank { o.optString("description") }
                 .ifBlank { o.optString("summary") }
-                .ifBlank { o.optString("text") }.trim()
+                .ifBlank { o.optString("text") }
+                // Parallel returns `excerpts` (a list); Firecrawl/You nest
+                // content under `markdown` / `contents`.
+                .ifBlank {
+                    val excerpts = o.optJSONArray("excerpts")
+                    if (excerpts != null && excerpts.length() > 0) excerpts.optString(0) else ""
+                }
+                .ifBlank { o.optString("markdown") }
+                .ifBlank { o.optString("sentence") }.trim()
             out += Result(title, url, snippet)
             if (out.size >= max) break
         }
@@ -513,17 +853,20 @@ object WebSearchTool {
     ): List<Result> {
         if (max <= 0) return emptyList()
         val html = fetchUrl(url, context = context) ?: return emptyList()
+        return parseHtmlLinks(html, max, pattern)
+    }
+
+    /** Shared by the Bing-HTML engine and the no-key Bing fallback. */
+    internal fun parseHtmlLinks(html: String, max: Int, pattern: Regex): List<Result> {
+        if (max <= 0) return emptyList()
         val out = mutableListOf<Result>()
         for (match in pattern.findAll(html)) {
             val link = match.groupValues.getOrNull(1)?.trim().orEmpty()
             if (!link.startsWith("http") || link.contains("bing.com/ck/") || link.contains("microsoft.com")) continue
             val title = match.groupValues.getOrNull(2).orEmpty()
-                .replace(Regex("<[^>]+>"), "")
-                .replace("&amp;", "&")
-                .replace("&quot;", "\"")
-                .trim()
-            if (title.isEmpty()) continue
-            out += Result(title, link, "")
+            val cleanTitle = stripTags(title)
+            if (link.isBlank() || cleanTitle.isBlank()) continue
+            out += Result(cleanTitle, link, "")
             if (out.size >= max) break
         }
         return out

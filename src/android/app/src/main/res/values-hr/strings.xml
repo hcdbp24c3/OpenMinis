@@ -2122,4 +2122,12 @@
 <string name="web_search_fallback">Fallback to DuckDuckGo</string>
 <string name="web_search_fallback_sub">If the selected engine fails, retry DuckDuckGo</string>
 <string name="web_search_fallback_footer">Empty results still recommend browser_use on a known URL.</string>
+
+    <string name="web_search_api_keys">API keys (one per line — they rotate)</string>
+    <string name="web_search_keys_configured">%1$d keys configured</string>
+    <string name="web_search_keys_rotate">%1$d keys — rotated per request</string>
+    <string name="web_search_url_override">Endpoint URL (optional)</string>
+    <string name="web_search_url_override_footer">Blank uses the documented endpoint for this provider. Set it to point at a self-hosted gateway or proxy.</string>
+    <string name="web_search_bing_local_detail">Bing public HTML results page — no API key. The paid Web Search API is a separate engine in the list.</string>
+    <string name="web_search_searxng_auth">Basic auth (optional)</string>
 </resources>

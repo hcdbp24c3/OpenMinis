@@ -2157,4 +2157,12 @@
 <string name="web_search_fallback">失败时回退 DuckDuckGo</string>
 <string name="web_search_fallback_sub">所选引擎失败时再试 DuckDuckGo</string>
 <string name="web_search_fallback_footer">仍然没有结果时会提示用 browser_use 打开已知网址。</string>
+
+    <string name="web_search_api_keys">API 密钥（每行一个，轮换使用）</string>
+    <string name="web_search_keys_configured">已配置 %1$d 个密钥</string>
+    <string name="web_search_keys_rotate">%1$d 个密钥 — 每次请求轮换</string>
+    <string name="web_search_url_override">接口地址（可选）</string>
+    <string name="web_search_url_override_footer">Blank uses the documented endpoint for this provider. Set it to point at a self-hosted gateway or proxy.</string>
+    <string name="web_search_bing_local_detail">Bing public HTML results page — no API key. The paid Web Search API is a separate engine in the list.</string>
+    <string name="web_search_searxng_auth">Basic 认证（可选）</string>
 </resources>
