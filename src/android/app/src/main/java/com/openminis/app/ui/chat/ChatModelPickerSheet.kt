@@ -1,10 +1,11 @@
 package com.openminis.app.ui.chat
 
-// [T-android-split-chat] ModelPickerSheet (+ providerDotColor) extracted
-// verbatim from ChatScreen.kt. Full import block copied from ChatScreen.kt
-// (unused imports are warnings, not errors); ModelPickerSheet flipped
-// private->internal so ChatScreen can call it. Search matcher lives in
-// ModelPickerLogic.matchesModelQuery (Kelivo contains-only).
+// [T-android-split-chat] ModelPickerSheet (+ its private helper
+// providerDotColor) extracted verbatim from ChatScreen.kt. Full import block
+// copied from ChatScreen.kt (unused imports are warnings, not errors);
+// ModelPickerSheet flipped private->internal so ChatScreen can call it.
+// Search matching/scoring lives in ui/components/ModelSearch (debounced,
+// relevance-ranked, capped).
 
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -94,7 +95,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -149,6 +149,9 @@ import com.openminis.app.ui.components.MinisMenuDivider
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.openminis.app.ui.components.rememberSheetScrollGuard
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Icon
@@ -171,8 +174,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.CompositionLocalProvider
@@ -181,11 +184,12 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.boundsInWindow
@@ -268,7 +272,6 @@ import com.openminis.app.data.model.LLMModel
 import com.openminis.app.data.model.ModelEntry
 import com.openminis.app.data.model.ModelGroup
 import com.openminis.app.data.model.ProviderConfig
-import com.openminis.app.data.model.ProviderInstance
 import com.openminis.app.data.model.ProviderType
 import com.openminis.app.data.model.RoutingStrategy
 import com.openminis.app.data.model.ThinkingLevel
@@ -278,10 +281,6 @@ import com.openminis.app.data.repository.ProviderRepository
 import com.openminis.app.ui.browser.BrowserSheet
 import com.openminis.app.ui.theme.ChatColors
 import com.openminis.app.ui.components.MinisTextButton
-
-// [T-android-search-precision] Replaced private fuzzyMatch with
-// matchesModelQuery (Kelivo contains-only). The old subsequence fallback
-// matched "deepseek-flash" inside "deepseek-v4-flash".
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -300,6 +299,9 @@ internal fun ModelPickerSheet(
      *  section header — dismisses the sheet and navigates to the Model Groups
      *  management screen. Null hides the button (callers without a route). */
     onEditGroups: (() -> Unit)? = null,
+    /** [T-android-picker-provider-edit] Edit button on each provider section
+     *  header — opens that provider instance's settings. Null hides it. */
+    onEditProvider: ((instanceId: String) -> Unit)? = null,
 ) {
     val openTime = remember { System.nanoTime() }
 
@@ -311,17 +313,13 @@ internal fun ModelPickerSheet(
         }
     }
 
-    var searchText by rememberSaveable { mutableStateOf("") }
     // [T-android-search-state-persist] `rememberSaveable` (not plain `remember`)
     // on `searchText` — mirrors the exact same bug + fix in ProviderDetailScreen.
     // Tapping a model row navigates to the entry edits, which destroys this
     // sheet's state; plain `remember{}` would reset the search keyword (and the
     // collapsed/expanded list) on the way back. rememberSaveable pins the
     // keyword to the NavBackStackEntry so a model-edit-and-return keeps it.
-    var debouncedSearchText by remember { mutableStateOf("") }
-    LaunchedEffect(searchText) {
-        debouncedSearchText = debounceSearchText(searchText)
-    }
+    var searchText by rememberSaveable { mutableStateOf("") }
     var expandedGroupIds by remember { mutableStateOf(setOf<String>()) }
     // Note: the non-text-output "may not work as an Agent" confirmation lives
     // in ChatScreen's callback wrappers (ee828dba), NOT here — the sheet stays
@@ -343,54 +341,67 @@ internal fun ModelPickerSheet(
      */
     var quickTestEntry by remember { mutableStateOf<ModelEntry?>(null) }
 
-    // Filtered groups
-    val filteredGroups = remember(groups, debouncedSearchText) {
-        if (debouncedSearchText.isEmpty()) groups
-        else {
-            val t0 = System.nanoTime()
-            val result = groups.filter { matchesModelQuery(it.name, debouncedSearchText) }
-            val ms = (System.nanoTime() - t0) / 1_000_000.0
-            AppLogger.info("ModelPicker", "[ModelPicker] filter groups: ${result.size}/${groups.size}, ${"%.1f".format(ms)}ms")
-            result
-        }
+    // [T-picker-search-debounce] Filter on the DEBOUNCED, normalized query,
+    // not on every keystroke (iOS GH#271). `searchText` still drives the field
+    // and the empty-state icon; only the search itself trails it.
+    val query = com.openminis.app.ui.components.rememberDebouncedQuery(searchText)
+
+    // Filtered groups — cheap (a handful of groups), stays in composition.
+    val filteredGroups = remember(groups, query) {
+        if (query.isEmpty()) groups
+        else groups.filter { com.openminis.app.ui.components.ModelSearch.score(it.name, query) > 0 }
     }
 
-    // Filtered entries by instance
-    val allInstancesWithEntries = remember(config, debouncedSearchText) {
-        val t0 = System.nanoTime()
-        val searching = debouncedSearchText.isNotEmpty()
-        var totalCount = 0
-        val result = config.instances
+    // [T-picker-search-cap] Provider sections built ONCE per config: one pass
+    // grouping entries by instance. This used to re-filter the whole entry
+    // list once per provider on every keystroke, in composition, and log a
+    // line per provider each time.
+    val baseSections = remember(config) {
+        val byInstance = config.modelEntries.asSequence()
+            .filter { !it.isHidden }
+            .groupBy { it.providerInstanceId }
+        config.instances
             .filter { it.isEnabled }
-            .map { instance ->
-                val pt = System.nanoTime()
-                val entries = config.modelEntries.filter {
-                    it.providerInstanceId == instance.id && !it.isHidden
-                }
-                // [T-android-model-picker-debounce] The default list is
-                // release-ranked newest-first; while searching we skip that
-                // re-sort (orderPickerEntries) and just filter the natural
-                // order, so ~2000 entries are not re-sorted per keystroke.
-                val filtered = if (searching) {
-                    entries.filter {
-                        matchesModelQuery(it.model.displayName, debouncedSearchText) ||
-                            matchesModelQuery(it.model.id, debouncedSearchText)
-                    }
-                } else {
-                    orderPickerEntries(entries, searching = false, providerRepository.releaseRankOrder)
-                }
-                val pms = (System.nanoTime() - pt) / 1_000_000.0
-                if (filtered.isNotEmpty()) {
-                    totalCount += filtered.size
-                    AppLogger.info("ModelPicker", "[ModelPicker] provider \"${instance.label.ifEmpty { instance.providerType.displayName }}\" models loaded: ${filtered.size} items, ${"%.1f".format(pms)}ms")
-                }
-                instance to filtered
-            }
+            // [T-android-model-picker-debounce] The unfiltered list is
+            // release-ranked newest-first so the picker never opens on a stale
+            // model. This list is built from the config snapshot rather than
+            // ProviderRepository.entriesFor(), so it does not inherit that
+            // accessor's sort — same reason UnifiedModelPickerSheet ranks its
+            // own sections. Search results rank by relevance and keep this
+            // order for ties.
+            .map { it to com.openminis.app.data.repository.ModelEntryRanking.sortedByReleaseRank(byInstance[it.id] ?: emptyList()) }
             .filter { it.second.isNotEmpty() }
-        val ms = (System.nanoTime() - t0) / 1_000_000.0
-        AppLogger.info("ModelPicker", "[ModelPicker] all providers loaded: total $totalCount items, ${"%.1f".format(ms)}ms")
-        result
     }
+    fun sectionLabel(instance: com.openminis.app.data.model.ProviderInstance) =
+        instance.label.ifEmpty { instance.providerType.displayName }
+
+    // [T-picker-search-relevance] Rank + cap off the main thread: with 7,000+
+    // models a search is thousands of string scans. The last result stays on
+    // screen until the new one lands, so a keystroke never flashes the
+    // unfiltered list.
+    var searchResult by remember {
+        mutableStateOf<com.openminis.app.ui.components.ModelSearch.Result<com.openminis.app.data.model.ProviderInstance>?>(null)
+    }
+    LaunchedEffect(baseSections, query) {
+        if (query.isEmpty()) {
+            searchResult = null
+            return@LaunchedEffect
+        }
+        val t0 = System.nanoTime()
+        val r = withContext(Dispatchers.Default) {
+            com.openminis.app.ui.components.ModelSearch.search(baseSections, ::sectionLabel, query)
+        }
+        searchResult = r
+        AppLogger.info(
+            "ModelPicker",
+            "[ModelPicker] search len=${query.length} matches=${r.totalMatches} shown=${r.shown} " +
+                "${"%.1f".format((System.nanoTime() - t0) / 1_000_000.0)}ms",
+        )
+    }
+    val allInstancesWithEntries: List<Pair<com.openminis.app.data.model.ProviderInstance, List<ModelEntry>>> =
+        if (query.isEmpty()) baseSections
+        else searchResult?.sections?.map { it.key to it.entries } ?: baseSections
+    val truncatedSearch = searchResult?.takeIf { query.isNotEmpty() && it.truncated }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -525,10 +536,16 @@ internal fun ModelPickerSheet(
                 },
             )
 
+            // [T-android-picker-scroll-guard] Swallow fling momentum at the top
+            // of the list so it cannot dismiss the sheet, while leaving a
+            // deliberate finger drag free to close it.
+            val pickerScrollGuard = rememberSheetScrollGuard()
+
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f, fill = false),
+                    .weight(1f, fill = false)
+                    .nestedScroll(pickerScrollGuard),
             ) {
                 // ── Model Groups (grouped section card with embedded header) ──
                 if (filteredGroups.isNotEmpty()) {
@@ -844,7 +861,7 @@ internal fun ModelPickerSheet(
                                                 )
                                                 Spacer(Modifier.width(8.dp))
                                                 Column(modifier = Modifier.weight(1f)) {
-                                                    Text(entry.model.displayName, style = MaterialTheme.typography.bodyMedium)
+                                                    ModelNameWithActiveBadge(entry.model.displayName, showActiveBadge = isActive)
                                                     Row {
                                                         if (instance != null) {
                                                             Text(
@@ -865,21 +882,6 @@ internal fun ModelPickerSheet(
                                                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                                                         )
                                                     }
-                                                }
-                                                if (isActive) {
-                                                    Text(
-                                                        stringResource(R.string.model_picker_active_badge),
-                                                        fontSize = 9.sp,
-                                                        lineHeight = 11.sp,
-                                                        fontWeight = FontWeight.Medium,
-                                                        color = Color(0xFF34C759),
-                                                        modifier = Modifier
-                                                            .background(
-                                                                Color(0xFF34C759).copy(alpha = 0.1f),
-                                                                RoundedCornerShape(50),
-                                                            )
-                                                            .padding(horizontal = 5.dp, vertical = 1.dp),
-                                                    )
                                                 }
                                                 QuickTestButton(onClick = { quickTestEntry = entry })
                                             }
@@ -913,34 +915,127 @@ internal fun ModelPickerSheet(
                     }
                 }
 
-                // ── Individual Models by Provider ──
-                //
-                // [T-android-showall-lag] COLLAPSED providers stay a single
-                // item (header + summary + "Show N models" — always small).
-                // EXPANDED providers split into a header item plus one lazy
-                // item per entry so LazyColumn virtualizes ~2000 rows instead
-                // of composing them all in one frame (the show-all freeze).
+                // ── Individual Models by Provider (one section card per provider) ──
+                // Each provider becomes a single grouped card containing: an
+                // embedded header row with the collapse chevron, then either
+                // the collapsed summary row or the expanded entry list. Cards
+                // are visually separated from each other by a 12dp gap, and
+                // sit on a higher tonal surface so the boundary between
+                // providers is unmistakable even on the dark sheet background.
                 if (allInstancesWithEntries.isNotEmpty()) {
                     allInstancesWithEntries.forEach { (instance, entries) ->
                         val isCollapsed = collapsedInstanceIds.contains(instance.id)
-                        if (isCollapsed) {
-                            item(key = "section_${instance.id}") {
-                                Column(
+                        // [T-picker-search-cap] An EXPANDED provider's rows are
+                        // their own lazy items (below), so a 7,000-model
+                        // aggregator composes only what is on screen. This
+                        // item is the card's top: header, hairline and — when
+                        // collapsed — the summary rows, closing the card.
+                        item(key = "section_${instance.id}") {
+                            Column(
+                                modifier = Modifier
+                                    .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = if (isCollapsed) 6.dp else 0.dp)
+                                    .background(
+                                        MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        if (isCollapsed) RoundedCornerShape(14.dp)
+                                        else RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp),
+                                    ),
+                            ) {
+                                // Header row, embedded in the card.
+                                Row(
+                                    // T236: tightened provider header padding
+                                    // (top=10/bottom=8) so the gap to the first
+                                    // model row reads as ~8dp rather than the
+                                    // earlier 12dp+row-padding stack.
                                     modifier = Modifier
-                                        .padding(horizontal = 16.dp, vertical = 6.dp)
-                                        .background(
-                                            MaterialTheme.colorScheme.surfaceContainerHigh,
-                                            RoundedCornerShape(14.dp),
-                                        ),
+                                        .fillMaxWidth()
+                                        .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    ProviderSectionHeader(
-                                        instance = instance,
-                                        isCollapsed = true,
-                                        onToggle = {
-                                            collapsedInstanceIds = collapsedInstanceIds - instance.id
-                                        },
+                                    val providerName = instance.label.ifEmpty { instance.providerType.displayName }
+                                    Text(
+                                        providerName,
+                                        // Same rank as the "Model Groups"
+                                        // header above — see that comment.
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        // [T-android-picker-provider-edit] One
+                                        // line, so a long name cannot push the
+                                        // two buttons off the row.
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
                                     )
+                                    // [T-android-picker-provider-edit] Edit
+                                    // button left of the chevron, as on iOS
+                                    // (698cc65c6): its own tap target, so it
+                                    // never folds the section, same 24dp
+                                    // circle as the chevron but tinted so it
+                                    // reads as an action.
+                                    if (onEditProvider != null) {
+                                        // [T-android-picker-provider-edit-text] A text "Edit" link,
+                                        // styled like the Model Groups "Edit" (iOS a0acb1c0f replaced its
+                                        // icon button with this). Compact rather than a MinisTextButton so
+                                        // the header row keeps its height; still its own tap target, so it
+                                        // never folds the section.
+                                        val editLabel = stringResource(R.string.model_picker_edit_provider, providerName)
+                                        Text(
+                                            stringResource(R.string.model_picker_groups_edit),
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            modifier = Modifier
+                                                .padding(end = 4.dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .clickable { onEditProvider(instance.id) }
+                                                .semantics { contentDescription = editLabel }
+                                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                                        )
+                                    }
+                                    // [T-android-model-picker-polish] Same
+                                    // neutral treatment as the group chevron
+                                    // above — see that comment for why the
+                                    // tinted container was dropped.
+                                    Box(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .background(
+                                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
+                                                CircleShape,
+                                            )
+                                            .clip(CircleShape)
+                                            .clickable {
+                                                collapsedInstanceIds = if (isCollapsed) {
+                                                    collapsedInstanceIds - instance.id
+                                                } else {
+                                                    collapsedInstanceIds + instance.id
+                                                }
+                                            },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            if (isCollapsed) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
 
+                                // [T-android-model-picker-polish] Hairline under
+                                // the provider name. The rows below it are
+                                // models, not more provider chrome, and without
+                                // a rule the header read as the first list item
+                                // — the same separation the group card gets
+                                // between its own header and its members.
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp),
+                                    thickness = 0.5.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                )
+
+                                if (isCollapsed) {
                                     // Collapsed summary — show selected or first entry + model count.
                                     val selectedEntry = entries.firstOrNull { it.id == activeEntryId && selectedGroupId == null }
                                     val displayEntry = selectedEntry ?: entries.firstOrNull()
@@ -1064,136 +1159,109 @@ internal fun ModelPickerSheet(
                                     }
                                 }
                             }
-                        } else {
-                            // Expanded: header is one item (top-rounded card +
-                            // hairline); each entry is its own item so
-                            // LazyColumn can recycle rows while scrolling a
-                            // ~2000-entry provider. Card surface is split
-                            // across items via the same padding + background
-                            // so the visual card still reads continuous.
-                            item(key = "section_${instance.id}_header") {
+                        }
+                        if (!isCollapsed) {
+                            itemsIndexed(entries, key = { _, e -> "entry_${instance.id}_${e.id}" }) { index, entry ->
+                                val isLastRow = index == entries.size - 1
                                 Column(
                                     modifier = Modifier
-                                        .padding(horizontal = 16.dp)
-                                        .padding(top = 6.dp)
+                                        .padding(start = 16.dp, end = 16.dp, bottom = if (isLastRow) 6.dp else 0.dp)
                                         .background(
                                             MaterialTheme.colorScheme.surfaceContainerHigh,
-                                            RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp),
+                                            if (isLastRow) RoundedCornerShape(bottomStart = 14.dp, bottomEnd = 14.dp)
+                                            else androidx.compose.ui.graphics.RectangleShape,
                                         ),
                                 ) {
-                                    ProviderSectionHeader(
-                                        instance = instance,
-                                        isCollapsed = false,
-                                        onToggle = {
-                                            collapsedInstanceIds = collapsedInstanceIds + instance.id
-                                        },
-                                    )
-                                }
-                            }
-                            itemsIndexed(
-                                entries,
-                                key = { _, entry -> "entry_${instance.id}_${entry.id}" },
-                            ) { index, entry ->
-                                val isSelected = activeEntryId == entry.id && selectedGroupId == null
-                                val dotColor = providerDotColor(instance.providerType)
-                                val isLast = index == entries.lastIndex
-                                // Last row clips its own bottom so the
-                                // ripple respects the card corners.
-                                val rowShape = if (isLast) {
-                                    RoundedCornerShape(bottomStart = 14.dp, bottomEnd = 14.dp)
-                                } else {
-                                    RoundedCornerShape(0.dp)
-                                }
-                                Column(
-                                    modifier = Modifier
-                                        .padding(horizontal = 16.dp)
-                                        .then(if (isLast) Modifier.padding(bottom = 6.dp) else Modifier)
-                                        .background(
-                                            MaterialTheme.colorScheme.surfaceContainerHigh,
-                                            if (isLast) rowShape else RectangleShape,
-                                        ),
-                                ) {
-                                    Row(
-                                        // T236: expanded entry row —
-                                        // vertical 14→8 + heightIn(min=48dp)
-                                        // for accessible tap target.
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .heightIn(min = 48.dp)
-                                            .clip(rowShape)
-                                            .clickable { onSelectEntry(entry.id) }
-                                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Icon(
-                                            if (isSelected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                                            contentDescription = null,
-                                            tint = if (isSelected) Color(0xFF007AFF)
-                                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                                            modifier = Modifier.size(20.dp),
-                                        )
-                                        Spacer(Modifier.width(10.dp))
-                                        Box(
+                                        val isSelected = activeEntryId == entry.id && selectedGroupId == null
+                                        val dotColor = providerDotColor(instance.providerType)
+                                        // Last row clips its own bottom so the
+                                        // ripple respects the card corners.
+                                        val rowShape = if (index == entries.size - 1) {
+                                            RoundedCornerShape(bottomStart = 14.dp, bottomEnd = 14.dp)
+                                        } else {
+                                            RoundedCornerShape(0.dp)
+                                        }
+                                        Row(
+                                            // T236: expanded entry row —
+                                            // vertical 14→8 + heightIn(min=48dp)
+                                            // for accessible tap target.
                                             modifier = Modifier
-                                                .size(6.dp)
-                                                .background(dotColor, CircleShape),
-                                        )
-                                        Spacer(Modifier.width(10.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                entry.model.displayName,
-                                                style = MaterialTheme.typography.bodyMedium,
+                                                .fillMaxWidth()
+                                                .heightIn(min = 48.dp)
+                                                .clip(rowShape)
+                                                .clickable { onSelectEntry(entry.id) }
+                                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Icon(
+                                                if (isSelected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                                contentDescription = null,
+                                                tint = if (isSelected) Color(0xFF007AFF)
+                                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                                                modifier = Modifier.size(20.dp),
                                             )
-                                            // [T-android-provider-voice] Modality
-                                            // chips (iOS entryRow badges). FlowRow so
-                                            // an overflow wraps whole chips to the
-                                            // next line instead of squeezing each
-                                            // Text into a vertical letter column.
-                                            FlowRow(
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                                itemVerticalAlignment = Alignment.CenterVertically,
-                                            ) {
-                                                Text(
-                                                    entry.model.id,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                            Spacer(Modifier.width(10.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(6.dp)
+                                                    .background(dotColor, CircleShape),
+                                            )
+                                            Spacer(Modifier.width(10.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                ModelNameWithActiveBadge(
+                                                    entry.model.displayName,
+                                                    showActiveBadge = selectedGroupId != null && activeEntryId == entry.id,
                                                 )
-                                                com.openminis.app.ui.components.modalityBadges(entry.model).forEach { badge ->
-                                                    com.openminis.app.ui.components.ModalityBadge(badge)
+                                                // [T-android-provider-voice] Modality
+                                                // chips (iOS entryRow badges). FlowRow so
+                                                // an overflow wraps whole chips to the
+                                                // next line instead of squeezing each
+                                                // Text into a vertical letter column.
+                                                FlowRow(
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                    itemVerticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    Text(
+                                                        entry.model.id,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                                    )
+                                                    com.openminis.app.ui.components.modalityBadges(entry.model).forEach { badge ->
+                                                        com.openminis.app.ui.components.ModalityBadge(badge)
+                                                    }
                                                 }
                                             }
+                                            QuickTestButton(onClick = { quickTestEntry = entry })
                                         }
-                                        if (selectedGroupId != null && activeEntryId == entry.id) {
-                                            Text(
-                                                stringResource(R.string.model_picker_active_badge),
-                                                fontSize = 9.sp,
-                                                lineHeight = 11.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                color = Color(0xFF34C759),
-                                                modifier = Modifier
-                                                    .background(
-                                                        Color(0xFF34C759).copy(alpha = 0.1f),
-                                                        RoundedCornerShape(50),
-                                                    )
-                                                    .padding(horizontal = 5.dp, vertical = 1.dp),
+                                        // Inset hairline between entries.
+                                        if (index < entries.size - 1) {
+                                            HorizontalDivider(
+                                                modifier = Modifier.padding(start = 52.dp, end = 16.dp),
+                                                thickness = 0.5.dp,
+                                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
                                             )
                                         }
-                                        QuickTestButton(onClick = { quickTestEntry = entry })
-                                    }
-                                    // Inset hairline between entries.
-                                    if (!isLast) {
-                                        HorizontalDivider(
-                                            modifier = Modifier.padding(start = 52.dp, end = 16.dp),
-                                            thickness = 0.5.dp,
-                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                                        )
-                                    }
                                 }
                             }
                         }
                     }
                 }
 
+                // [T-picker-search-cap] Say when a search was truncated, so the
+                // capped list never silently reads as "that's all".
+                truncatedSearch?.let { r ->
+                    item(key = "__search_cap_footer__") {
+                        Text(
+                            stringResource(R.string.model_picker_search_capped, r.shown, r.totalMatches),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 8.dp),
+                        )
+                    }
+                }
 
                 // ── Empty / No Results ──
                 if (filteredGroups.isEmpty() && allInstancesWithEntries.isEmpty()) {
@@ -1255,69 +1323,43 @@ internal fun ModelPickerSheet(
 }
 
 /**
- * [T-android-showall-lag] Provider header shared by the collapsed card and
- * the expanded header item. Extracted so both LazyColumn keys render the
- * same title + chevron without duplicating the old inline header.
+ * A picker row's model name, with the green "Active" badge right after it.
  *
- * [T-android-model-picker-polish] Neutral chevron treatment — same as the
- * group chevron above (tinted container dropped); hairline separates the
- * provider name from the model rows below.
+ * The badge used to sit at the row's trailing edge, beside the quick-test
+ * button. There it took width from the whole text column, so the second line
+ * (provider label + model id) wrapped early: long ids such as
+ * `claude-opus-4-6-thinking` broke onto a third line. Inline after the name,
+ * it only competes with the name, which is short, and the id line gets the
+ * full column width.
+ *
+ * `weight(1f, fill = false)` lets a long name shrink and wrap while keeping
+ * the badge visible, instead of pushing the badge out of the row.
  */
 @Composable
-private fun ProviderSectionHeader(
-    instance: ProviderInstance,
-    isCollapsed: Boolean,
-    onToggle: () -> Unit,
-) {
-    Row(
-        // T236: tightened provider header padding
-        // (top=10/bottom=8) so the gap to the first
-        // model row reads as ~8dp rather than the
-        // earlier 12dp+row-padding stack.
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+private fun ModelNameWithActiveBadge(name: String, showActiveBadge: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
-            instance.label.ifEmpty { instance.providerType.displayName },
-            // Same rank as the "Model Groups"
-            // header above — see that comment.
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f),
+            name,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f, fill = false),
         )
-        Box(
-            modifier = Modifier
-                .size(24.dp)
-                .background(
-                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
-                    CircleShape,
-                )
-                .clip(CircleShape)
-                .clickable(onClick = onToggle),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                if (isCollapsed) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        if (showActiveBadge) {
+            Spacer(Modifier.width(6.dp))
+            Text(
+                stringResource(R.string.model_picker_active_badge),
+                fontSize = 9.sp,
+                lineHeight = 11.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color(0xFF34C759),
+                modifier = Modifier
+                    .background(
+                        Color(0xFF34C759).copy(alpha = 0.1f),
+                        RoundedCornerShape(50),
+                    )
+                    .padding(horizontal = 5.dp, vertical = 1.dp),
             )
         }
     }
-    // [T-android-model-picker-polish] Hairline under
-    // the provider name. The rows below it are
-    // models, not more provider chrome, and without
-    // a rule the header read as the first list item
-    // — the same separation the group card gets
-    // between its own header and its members.
-    HorizontalDivider(
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp),
-        thickness = 0.5.dp,
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-    )
 }
 
 /**
@@ -1354,6 +1396,7 @@ private fun providerDotColor(providerType: ProviderType?): Color = when (provide
     ProviderType.openRouter -> Color(0xFF00BCD4) // cyan
     ProviderType.xAI -> Color(0xFFFF7043)        // orange — Grok brand
     ProviderType.kimiCode -> Color(0xFF5C6BC0)   // indigo — Kimi accent
+    ProviderType.githubCopilot -> Color(0xFF6E5494) // purple — GitHub accent
     // [T-android-provider-type-parity] Responses API instances are
     // OpenAI under the hood — same green dot. Undrivable types share
     // the neutral gray used for "no provider".

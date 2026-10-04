@@ -1,5 +1,19 @@
 import SwiftUI
 
+/// Precise model search match (Kelivo semantics): case-insensitive contiguous
+/// substring only. No subsequence/fuzzy fallback — `deepseek-flash` must NOT
+/// match `deepseek-v4-flash`. Empty query matches everything.
+///
+/// [T-ios-manage-provider-models] Lives here (it used to be a free function in
+/// UnifiedModelPicker.swift) because this sheet is its only remaining consumer:
+/// the picker moved to the relevance-scored ModelSearchScorer, while this
+/// sheet keeps the precise filter over the provider's own catalog.
+private func fuzzyMatch(query: String, text: String) -> Bool {
+    let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+    if q.isEmpty { return true }
+    return text.lowercased().contains(q)
+}
+
 extension Notification.Name {
     /// Posted when the user taps Done on ManageProviderModelsSheet; the host
     /// clears `showManageModelsSheet` (the sheet body itself cannot call
@@ -152,9 +166,18 @@ struct ManageProviderModelsSheet: View {
                 HStack(spacing: 5) {
                     Text(entry.model.displayName)
                         .font(.subheadline)
-                        .foregroundStyle(entry.isHidden ? .secondary : .primary)
+                        .foregroundStyle(entry.isHidden || entry.isUnavailableFromProvider ? .secondary : .primary)
                     if entry.isCustom {
                         Text(AppLocalized("Custom"))
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.orange)
+                    }
+                    // [T-model-absence-grace] The provider stopped listing this
+                    // model. The entry (and its overrides) is kept for the grace
+                    // window, so say why it is greyed out instead of letting it
+                    // look normal — mirrors the inline list this sheet replaced.
+                    if entry.isUnavailableFromProvider {
+                        Text(AppLocalized("Not listed by provider"))
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(.orange)
                     }
