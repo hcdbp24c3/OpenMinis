@@ -35,6 +35,10 @@ extension AIChatViewModel {
         // wording (see baseSystemPrompt below) so the model can correctly
         // tell the user to re-enable memory via /memory or Settings.
         let includeMemoryTools = memoryEnabled
+        // [T-ios-web-search] Absent from the schema when the switch is off, so
+        // the model never learns the tool exists (same discipline as browser_use
+        // and the memory tools).
+        let includeWebSearch = AgentToolSwitch.webSearch.isEnabled
         var tools: [AgentToolDefinition] = [
             AgentToolDefinition(
                 name: "shell_execute",
@@ -209,6 +213,12 @@ extension AIChatViewModel {
         // switch can flip mid-run and the child's next turn must honour it.
         if !Self.toolEnabled(.browser) {
             tools.removeAll { $0.name == "browser_use" }
+        }
+
+        // [T-ios-web-search] Appended only when the switch is on, so the schema
+        // of a fresh conversation never advertises a tool the user turned off.
+        if Self.toolEnabled(.webSearch) {
+            tools.append(WebSearchTool.definition())
         }
 
         // [T-p1-delegate-task] Depth = 1: a helper never sees this tool.

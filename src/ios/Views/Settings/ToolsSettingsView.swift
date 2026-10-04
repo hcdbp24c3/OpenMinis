@@ -31,6 +31,9 @@ import SwiftUI
 enum AgentToolSwitch: String, CaseIterable {
     case browser = "agent.tools.browser.enabled"
     case agents = "agent.tools.agents.enabled"
+    /// [T-ios-web-search] web_search. Key string is byte-identical to Android's
+    /// `AgentToolSwitch.WEB_SEARCH` so the choice syncs with a user's settings.
+    case webSearch = "agent.tools.websearch.enabled"
 
     var key: String { rawValue }
 
@@ -55,6 +58,9 @@ enum AgentToolSwitch: String, CaseIterable {
         switch self {
         case .browser: return true
         case .agents: return true
+        // [T-ios-web-search] ON, like Android: the default backend (DuckDuckGo)
+        // needs no key, and the alternative for a fact is the browser tool.
+        case .webSearch: return true
         }
     }
 
@@ -74,6 +80,7 @@ enum AgentToolSwitch: String, CaseIterable {
         switch toolName {
         case "browser_use": return .browser
         case SubAgentDefinition.toolName: return .agents
+        case WebSearchTool.name: return .webSearch
         default: return nil
         }
     }
@@ -117,6 +124,7 @@ enum AgentToolSwitch: String, CaseIterable {
 
 struct ToolsSettingsView: View {
     @AppStorage(AgentToolSwitch.browser.key) private var browserEnabled: Bool = AgentToolSwitch.browser.defaultValue
+    @AppStorage(AgentToolSwitch.webSearch.key) private var webSearchEnabled: Bool = AgentToolSwitch.webSearch.defaultValue
 
     var body: some View {
         Form {
@@ -124,6 +132,19 @@ struct ToolsSettingsView: View {
                 toolRow(AppLocalized("Browser Use"), tool: "browser_use", icon: "globe", isOn: $browserEnabled)
             } footer: {
                 Text(AppLocalized("Browse the web in the in-app browser: open pages, read them, click and type. Stable and on by default. When off, the tool is removed from every conversation — the model does not see it at all."))
+            }
+            // [T-ios-web-search] Same kind of choice as Browser Use — may the
+            // agent reach the network on its own — with a different cost: one
+            // request instead of a WebView page load.
+            Section {
+                toolRow(AppLocalized("Web Search"), tool: WebSearchTool.name, icon: "magnifyingglass", isOn: $webSearchEnabled)
+                NavigationLink {
+                    WebSearchSettingsView()
+                } label: {
+                    Label(AppLocalized("Search engine"), systemImage: "gearshape")
+                }
+            } footer: {
+                Text(AppLocalized("Search the web and get titles, URLs and snippets in one request — usually far faster than opening a page with the browser tool. Pick the engine and add API keys on the Search engine screen. Off removes the tool from every conversation."))
             }
             // [T-sub-agents-v1] No Agents section here, and deliberately not
             // even a read-only pointer row: the switch belongs to the Sub Agents

@@ -657,6 +657,19 @@ extension AIChatViewModel {
                 await MainActor.run { SkillStore.shared.reload() }
             }
 
+        case "web_search":
+            // [T-ios-web-search] Same belt-and-braces as browser_use below: not in
+            // the schema when off, but a request built before the switch flipped
+            // (or a replayed turn) can still name it.
+            guard AgentToolSwitch.isToolEnabled(tu.name) else {
+                toolOutput = Self.toolsDisabledMessage
+                toolSuccess = false
+                break
+            }
+            let searchExecution = await WebSearchTool.execute(argsJSON: argsJson)
+            toolOutput = searchExecution.output
+            toolSuccess = searchExecution.success
+
         case "browser_use":
             // [T-tools-master-switch] Not in the schema when off; a request
             // built before the switch flipped can still name it.
