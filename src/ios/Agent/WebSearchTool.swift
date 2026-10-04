@@ -1,137 +1,17 @@
 import Foundation
 
-// MARK: - [T-ios-web-search] Engine selection
-
-/// User-configurable search backend for `WebSearchTool`.
-///
-/// Ported from tall-1997/OpenMinis-Linux (Android, GPL-3 — same licence family
-/// as this repo), which itself follows Kelivo's multi-backend design. The
-/// UserDefaults key strings are byte-identical to the Android ones so a future
-/// settings sync can carry a user's choice across platforms unchanged, the same
-/// discipline `AgentToolSwitch` already follows.
-///
-/// DuckDuckGo stays the default because it needs no key: the tool works on a
-/// fresh install, and every keyed backend is opt-in.
-enum WebSearchEngine: String, CaseIterable {
-    case ddg
-    case searxng
-    case bing
-    case tavily
-    case bocha
-    case exa
-    case brave
-    case jina
-    case zhipu
-    case custom
-
-    var needsKey: Bool {
-        switch self {
-        case .ddg, .searxng, .custom: return false
-        case .bing, .tavily, .bocha, .exa, .brave, .jina, .zhipu: return true
-        }
-    }
-}
-
-/// UserDefaults-backed settings for `WebSearchTool`.
-enum WebSearchSettings {
-    static let engineKey = "engine"
-    static let searxngURLKey = "searxng_url"
-    static let fallbackKey = "fallback_ddg"
-    static let customURLKey = "custom_url"
-    static let customKeyKey = "custom_key"
-    static let customKeyHeaderKey = "custom_key_header"
-
-    /// Per-engine credential keys. Same spelling as Android's
-    /// `WebSearchSettings.KEY_*`, one key per engine rather than a dictionary so
-    /// an older build cannot drop an unknown engine's credential on rewrite.
-    static func credentialKey(_ engine: WebSearchEngine) -> String {
-        switch engine {
-        case .bing: return "bing_key"
-        case .tavily: return "tavily_key"
-        case .bocha: return "bocha_key"
-        case .exa: return "exa_key"
-        case .brave: return "brave_key"
-        case .jina: return "jina_key"
-        case .zhipu: return "zhipu_key"
-        case .ddg, .searxng, .custom: return ""
-        }
-    }
-
-    private static var defaults: UserDefaults { .standard }
-
-    static var engine: WebSearchEngine {
-        if let raw = defaults.string(forKey: engineKey),
-           let parsed = WebSearchEngine(rawValue: raw) {
-            return parsed
-        }
-        // No explicit choice: prefer a backend the user has already configured,
-        // else DuckDuckGo. Mirrors Android's `firstConfigured() ?: DDG`.
-        return configuredKeyed.first ?? .ddg
-    }
-
-    static func setEngine(_ engine: WebSearchEngine) {
-        defaults.set(engine.rawValue, forKey: engineKey)
-    }
-
-    /// Keyed backends the user has already filled in, in enum order.
-    static var configuredKeyed: [WebSearchEngine] {
-        WebSearchEngine.allCases.filter { $0.needsKey && !apiKey(for: $0).isEmpty }
-    }
-
-    static func apiKey(for engine: WebSearchEngine) -> String {
-        let key = credentialKey(engine)
-        guard !key.isEmpty else { return "" }
-        return (defaults.string(forKey: key) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    static func setAPIKey(_ value: String, for engine: WebSearchEngine) {
-        let key = credentialKey(engine)
-        guard !key.isEmpty else { return }
-        defaults.set(value.trimmingCharacters(in: .whitespacesAndNewlines), forKey: key)
-    }
-
-    static var searxngURL: String {
-        get { (defaults.string(forKey: searxngURLKey) ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
-        set { defaults.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: searxngURLKey) }
-    }
-
-    static var customURL: String {
-        get { (defaults.string(forKey: customURLKey) ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
-        set { defaults.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: customURLKey) }
-    }
-
-    static var customKey: String {
-        get { (defaults.string(forKey: customKeyKey) ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
-        set { defaults.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: customKeyKey) }
-    }
-
-    static var customKeyHeader: String {
-        get { (defaults.string(forKey: customKeyHeaderKey) ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
-        set { defaults.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: customKeyHeaderKey) }
-    }
-
-    /// Retry DuckDuckGo after the selected engine fails. Default ON, as on Android.
-    static var fallbackEnabled: Bool {
-        defaults.object(forKey: fallbackKey) as? Bool ?? true
-    }
-
-    static func setFallbackEnabled(_ enabled: Bool) {
-        defaults.set(enabled, forKey: fallbackKey)
-    }
-}
-
 // MARK: - [T-ios-web-search] The tool
 
 /// Search the public web and return titles, URLs and snippets.
 ///
-/// Android twin: `tools/WebSearchTool.kt` — same engines, same request shapes,
-/// same parsing rules, same no-key fallbacks. Kept in step deliberately: a
-/// vendor that answers one platform and 400s the other is the failure mode this
-/// pairing exists to prevent, and the parsers are pinned by tests on both sides.
+/// Android twin: `tools/WebSearchTool.kt` — same engine table, same request
+/// shapes, same parsers, same fallbacks, kept in step deliberately: a vendor that
+/// answers one client and rejects the other is the failure this pairing exists to
+/// prevent, and the parsers are pinned by tests on the Android side.
 ///
 /// The point of the tool is cost: looking up a fact used to mean `browser_use` —
-/// a real WebView, a page load, a screenshot round-trip. This is one HTTP
-/// request that returns text the model can read directly.
+/// a real WebView, a page load, a screenshot round-trip. This is one HTTP request
+/// that returns text the model can read directly.
 enum WebSearchTool {
     static let name = "web_search"
     static let maxResults = 8
@@ -144,7 +24,7 @@ enum WebSearchTool {
     }
 
     /// What the dispatcher needs: the text for the transcript, and whether the
-    /// call succeeded. Mirrors Android's `ToolExecutionResult` fields it uses.
+    /// call succeeded.
     struct Execution {
         let output: String
         let success: Bool
@@ -191,10 +71,10 @@ enum WebSearchTool {
 
         let preferred = WebSearchSettings.engine
         var engines: [WebSearchEngine] = [preferred]
-        // A user who picked DuckDuckGo must not silently spend keyed quotas when
-        // it returns nothing: keyed fallback only runs after a KEYED engine was
-        // the one they asked for.
-        if WebSearchSettings.fallbackEnabled, preferred != .ddg {
+        // A user who picked a no-key engine must not silently spend keyed quotas
+        // when it returns nothing: keyed fallback only runs after a KEYED engine
+        // was the one they asked for.
+        if WebSearchSettings.fallbackEnabled, preferred.needsKey {
             engines += WebSearchSettings.configuredKeyed.filter { $0 != preferred }
             if !engines.contains(.ddg) { engines.append(.ddg) }
         }
@@ -236,90 +116,41 @@ enum WebSearchTool {
         let error: String?
     }
 
+    /// Same bodies, headers and parse routes as the Android switch. Kept in the
+    /// same ORDER as `WebSearchEngine` so the two files can be diffed.
     private static func search(engine: WebSearchEngine, query: String, max: Int) async -> Attempt {
         switch engine {
         case .ddg:
             return await searchDuckDuckGo(query: query, max: max)
 
+        // Bing's public HTML endpoint: no key, and the reason "Bing is free".
+        // The paid Web Search API is a separate engine for users who have one.
+        case .bingLocal:
+            guard max > 0 else { return Attempt(results: [], error: nil) }
+            guard let html = await fetch("https://www.bing.com/search?q=\(urlEncode(query))&setlang=zh-Hans") else {
+                return Attempt(results: [], error: "empty response from Bing HTML")
+            }
+            let parsed = parseHTMLLinks(
+                html,
+                max: max,
+                pattern: "<h2>\\s*<a[^>]+href=\"(https?://[^\"]+)\"[^>]*>(.*?)</a>"
+            )
+            return Attempt(results: parsed, error: parsed.isEmpty ? "Bing HTML returned no results" : nil)
+
         case .searxng:
             let base = WebSearchSettings.searxngURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             guard !base.isEmpty else { return Attempt(results: [], error: "SearXNG URL is not configured") }
             let endpoint = base.hasSuffix("/search") ? base : "\(base)/search"
-            guard let body = await fetch("\(endpoint)?q=\(urlEncode(query))&format=json") else {
+            var headers: [String: String] = [:]
+            let auth = WebSearchSettings.searxngAuth
+            if !auth.isEmpty, let token = auth.data(using: .utf8)?.base64EncodedString() {
+                headers["Authorization"] = "Basic \(token)"
+            }
+            guard let body = await fetch("\(endpoint)?q=\(urlEncode(query))&format=json", extraHeaders: headers) else {
                 return Attempt(results: [], error: "empty response from SearXNG")
             }
             let parsed = parseSearxJSON(body, max: max)
             return Attempt(results: parsed, error: parsed.isEmpty ? "SearXNG returned no results" : nil)
-
-        case .bing:
-            return await keyedGet(
-                engine: engine,
-                url: "https://api.bing.microsoft.com/v7.0/search?q=\(urlEncode(query))&count=\(max)",
-                headerName: "Ocp-Apim-Subscription-Key",
-                max: max
-            ) { parseBingJSON($0, max: max) }
-
-        case .tavily:
-            return await keyedPost(
-                engine: engine,
-                url: "https://api.tavily.com/search",
-                body: ["query": query, "max_results": max, "search_depth": "basic"],
-                keyField: "api_key",
-                headerName: nil,
-                bearer: false,
-                max: max
-            )
-
-        case .bocha:
-            return await keyedPost(
-                engine: engine,
-                url: "https://api.bochaai.com/v1/web-search",
-                body: ["query": query, "count": max, "summary": true],
-                keyField: nil,
-                headerName: nil,
-                bearer: true,
-                max: max
-            )
-
-        case .exa:
-            return await keyedPost(
-                engine: engine,
-                url: "https://api.exa.ai/search",
-                body: ["query": query, "numResults": max, "contents": ["text": ["maxCharacters": 400]]],
-                keyField: nil,
-                headerName: "x-api-key",
-                bearer: false,
-                max: max
-            )
-
-        case .brave:
-            return await keyedGet(
-                engine: engine,
-                url: "https://api.search.brave.com/res/v1/web/search?q=\(urlEncode(query))&count=\(max)",
-                headerName: "X-Subscription-Token",
-                max: max
-            ) { parseGenericSearchJSON($0, max: max) }
-
-        case .jina:
-            return await keyedGet(
-                engine: engine,
-                url: "https://s.jina.ai/\(urlEncode(query))",
-                headerName: "Authorization",
-                bearer: true,
-                extra: ["Accept": "application/json"],
-                max: max
-            ) { parseGenericSearchJSON($0, max: max) }
-
-        case .zhipu:
-            return await keyedPost(
-                engine: engine,
-                url: "https://open.bigmodel.cn/api/paas/v4/web_search",
-                body: ["search_query": query, "count": max],
-                keyField: nil,
-                headerName: nil,
-                bearer: true,
-                max: max
-            )
 
         case .custom:
             let template = WebSearchSettings.customURL
@@ -344,6 +175,280 @@ enum WebSearchTool {
                 ? parseGenericSearchJSON(body, max: max)
                 : parseHTML(body, max: max)
             return Attempt(results: parsed, error: parsed.isEmpty ? "Custom search returned no results" : nil)
+
+        case .tavily:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: ["query": query, "max_results": max, "search_depth": "basic"],
+                keyField: "api_key",
+                headerName: nil,
+                bearer: false,
+                max: max
+            )
+
+        case .bing:
+            return await keyedGet(
+                engine: engine,
+                url: "\(WebSearchSettings.resolvedURL(for: engine))?q=\(urlEncode(query))&count=\(max)",
+                headerName: "Ocp-Apim-Subscription-Key",
+                max: max
+            ) { parseBingJSON($0, max: max) }
+
+        case .brave:
+            return await keyedGet(
+                engine: engine,
+                url: "\(WebSearchSettings.resolvedURL(for: engine))?q=\(urlEncode(query))&count=\(max)",
+                headerName: "X-Subscription-Token",
+                max: max
+            ) { parseGenericSearchJSON($0, max: max) }
+
+        case .exa:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: [
+                    "query": query,
+                    "numResults": max,
+                    "contents": ["text": ["maxCharacters": 400]],
+                ],
+                keyField: nil,
+                headerName: "x-api-key",
+                bearer: false,
+                max: max
+            )
+
+        case .jina:
+            let base = WebSearchSettings.resolvedURL(for: engine).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            return await keyedGet(
+                engine: engine,
+                url: "\(base)/\(urlEncode(query))",
+                headerName: "Authorization",
+                bearer: true,
+                extra: ["Accept": "application/json"],
+                max: max
+            ) { parseGenericSearchJSON($0, max: max) }
+
+        case .bocha:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: ["query": query, "count": max, "summary": true],
+                keyField: nil,
+                headerName: nil,
+                bearer: true,
+                max: max
+            )
+
+        case .zhipu:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: ["search_query": query, "count": max],
+                keyField: nil,
+                headerName: nil,
+                bearer: true,
+                max: max
+            )
+
+        case .kagi:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: ["query": query, "workflow": "search", "format": "json", "limit": max],
+                keyField: nil,
+                headerName: nil,
+                bearer: true,
+                max: max
+            )
+
+        case .linkup:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: [
+                    "q": query,
+                    "depth": "standard",
+                    "outputType": "sourcedAnswer",
+                    "includeImages": "false",
+                ],
+                keyField: nil,
+                headerName: nil,
+                bearer: true,
+                max: max
+            )
+
+        case .metaso:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: ["q": query, "scope": "webpage", "size": max, "includeSummary": false],
+                keyField: nil,
+                headerName: nil,
+                bearer: true,
+                max: max
+            )
+
+        case .ollama:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: ["query": query, "max_results": min(max, 10)],
+                keyField: nil,
+                headerName: nil,
+                bearer: true,
+                max: max
+            )
+
+        case .parallel:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: ["objective": query, "search_queries": [query], "mode": "basic"],
+                keyField: nil,
+                headerName: "x-api-key",
+                bearer: false,
+                max: max
+            )
+
+        case .perplexity:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: ["query": query, "max_results": min(max, 20)],
+                keyField: nil,
+                headerName: nil,
+                bearer: true,
+                max: max
+            )
+
+        case .querit:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: ["query": query, "count": max],
+                keyField: nil,
+                headerName: nil,
+                bearer: true,
+                max: max
+            )
+
+        case .serper:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: ["q": query, "num": max],
+                keyField: nil,
+                headerName: "X-API-KEY",
+                bearer: false,
+                max: max
+            )
+
+        case .stepfun:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: ["query": query],
+                keyField: nil,
+                headerName: nil,
+                bearer: true,
+                max: max
+            )
+
+        case .tinyfish:
+            let base = WebSearchSettings.resolvedURL(for: engine).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            return await keyedGet(
+                engine: engine,
+                url: "\(base)?query=\(urlEncode(query))&num=\(max)",
+                headerName: "X-API-Key",
+                max: max
+            ) { parseGenericSearchJSON($0, max: max) }
+
+        case .you:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: ["query": query, "count": max],
+                keyField: nil,
+                headerName: "X-API-Key",
+                bearer: false,
+                max: max
+            )
+
+        case .firecrawl:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: ["query": query, "limit": min(max(max, 1), 100), "sources": ["web", "news"]],
+                keyField: nil,
+                headerName: nil,
+                bearer: true,
+                max: max
+            )
+
+        case .anysearch:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: ["query": query, "max_results": min(max, 20), "format": "json"],
+                keyField: nil,
+                headerName: nil,
+                bearer: true,
+                max: max
+            )
+
+        // Vendor-specific shapes: Doubao's PascalCase envelope, Kimi's chunked
+        // text, Grok's answer plus url_citation annotations.
+        case .doubao:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: [
+                    "Query": query,
+                    "SearchType": "web",
+                    "Count": max,
+                    "Filter": ["NeedUrl": true],
+                ],
+                keyField: nil,
+                headerName: nil,
+                bearer: true,
+                max: max,
+                parse: parseDoubaoJSON
+            )
+
+        case .kimi:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: ["text_query": query, "limit": min(max, 20), "timeout_seconds": 30],
+                keyField: nil,
+                headerName: nil,
+                bearer: true,
+                max: max,
+                parse: parseKimiJSON
+            )
+
+        case .grok:
+            return await keyedPost(
+                engine: engine,
+                url: WebSearchSettings.resolvedURL(for: engine),
+                body: [
+                    "model": "grok-4.5",
+                    "input": [
+                        ["role": "system", "content": grokSystemPrompt],
+                        ["role": "user", "content": query],
+                    ],
+                    "tools": [["type": "web_search"]],
+                    "store": false,
+                    "stream": false,
+                    "reasoning": ["effort": "low"],
+                ],
+                keyField: nil,
+                headerName: nil,
+                bearer: true,
+                max: max,
+                parse: parseGrokJSON
+            )
         }
     }
 
@@ -356,7 +461,7 @@ enum WebSearchTool {
         max: Int,
         parse: (String) -> [Result]
     ) async -> Attempt {
-        let key = WebSearchSettings.apiKey(for: engine)
+        let key = SearchKeyRotator.select(engine)
         guard !key.isEmpty else { return Attempt(results: [], error: "\(engine.rawValue) API key is not configured") }
         var headers = ["Accept": "application/json"]
         headers.merge(extra) { _, new in new }
@@ -375,9 +480,10 @@ enum WebSearchTool {
         keyField: String?,
         headerName: String?,
         bearer: Bool,
-        max: Int
+        max: Int,
+        parse: (String, Int) throws -> [Result] = { parseGenericSearchJSON($0, max: $1) }
     ) async -> Attempt {
-        let key = WebSearchSettings.apiKey(for: engine)
+        let key = SearchKeyRotator.select(engine)
         guard !key.isEmpty else { return Attempt(results: [], error: "\(engine.rawValue) API key is not configured") }
         var payload = body
         if let keyField { payload[keyField] = key }
@@ -387,31 +493,94 @@ enum WebSearchTool {
         guard let raw = await postJSON(url, json: payload, extraHeaders: headers) else {
             return Attempt(results: [], error: "empty response from \(engine.rawValue)")
         }
-        let parsed = parseGenericSearchJSON(raw, max: max)
-        return Attempt(results: parsed, error: parsed.isEmpty ? "\(engine.rawValue) returned no results" : nil)
+        do {
+            let parsed = try parse(raw, max)
+            return Attempt(results: parsed, error: parsed.isEmpty ? "\(engine.rawValue) returned no results" : nil)
+        } catch {
+            // A vendor error envelope is more useful than "no results": it names
+            // the bad key or the rejected field.
+            return Attempt(results: [], error: error.localizedDescription)
+        }
     }
 
-    // MARK: - DuckDuckGo (no key)
+    private static let grokSystemPrompt =
+        "You are a search assistant. Answer with the facts you retrieved and cite them."
 
-    private static func searchDuckDuckGo(query: String, max: Int) async -> Attempt {
-        let urls = [
-            "https://html.duckduckgo.com/html/?q=\(urlEncode(query))",
-            "https://lite.duckduckgo.com/lite/?q=\(urlEncode(query))",
-        ]
-        var last = "DuckDuckGo returned no cards"
-        var sawBody = false
-        for url in urls {
-            guard let html = await fetch(url) else { continue }
-            sawBody = true
-            if html.contains("anomaly.js") || html.contains("Unfortunately, bots use DuckDuckGo") {
-                last = "DuckDuckGo blocked this client. Set a backend in Settings → Web search."
-                continue
-            }
-            let parsed = parseHTML(html, max: max)
-            if !parsed.isEmpty { return Attempt(results: parsed, error: nil) }
+    // MARK: - Kelivo provider parsers
+
+    /// A vendor error envelope, surfaced instead of an empty result list.
+    struct SearchError: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    /// Doubao answers `{Result:{WebResults:[{Title,Url,Summary|Content|Snippet}]}}`.
+    static func parseDoubaoJSON(_ json: String, max: Int = maxResults) throws -> [Result] {
+        guard let data = json.data(using: .utf8),
+              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return [] }
+        if let metadata = root["ResponseMetadata"] as? [String: Any],
+           let error = metadata["Error"] as? [String: Any] {
+            // "bad key" is actionable; "no results" is not.
+            let message = (error["Message"] as? String) ?? (error["Code"] as? String) ?? "API error"
+            throw SearchError(message: message)
         }
-        if !sawBody { last = "empty response from DuckDuckGo" }
-        return Attempt(results: [], error: last)
+        guard let result = root["Result"] as? [String: Any],
+              let arr = result["WebResults"] as? [[String: Any]] else { return [] }
+        var out: [Result] = []
+        for item in arr {
+            let url = (item["Url"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !url.isEmpty else { continue }
+            let snippet = firstNonEmpty(item, ["Summary", "Content", "Snippet"])
+            out.append(Result(title: (item["Title"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines), url: url, snippet: snippet))
+            if out.count >= max { break }
+        }
+        return out
+    }
+
+    /// Kimi answers `{search_results:[{title,url,chunks:[{text}]}]}`.
+    static func parseKimiJSON(_ json: String, max: Int = maxResults) -> [Result] {
+        guard let data = json.data(using: .utf8),
+              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let arr = root["search_results"] as? [[String: Any]] else { return [] }
+        var out: [Result] = []
+        for item in arr {
+            let url = (item["url"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !url.isEmpty else { continue }
+            let chunks = (item["chunks"] as? [[String: Any]] ?? [])
+                .map { ($0["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            let joined = chunks.joined(separator: "\n\n")
+            let snippet = joined.isEmpty ? (item["snippet"] as? String ?? "") : joined
+            out.append(Result(title: (item["title"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines), url: url, snippet: snippet))
+            if out.count >= max { break }
+        }
+        return out
+    }
+
+    /// Grok (xAI Responses API) answers with the model's text plus `url_citation`
+    /// annotations. The answer is not itself a search result, so only the
+    /// citations become results — that is what the caller can follow up on.
+    static func parseGrokJSON(_ json: String, max: Int = maxResults) -> [Result] {
+        guard let data = json.data(using: .utf8),
+              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let output = root["output"] as? [[String: Any]] else { return [] }
+        var out: [Result] = []
+        var seen = Set<String>()
+        for item in output {
+            guard let content = item["content"] as? [[String: Any]] else { continue }
+            for block in content {
+                guard let annotations = block["annotations"] as? [[String: Any]] else { continue }
+                for annotation in annotations {
+                    guard (annotation["type"] as? String) == "url_citation" else { continue }
+                    let url = (annotation["url"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !url.isEmpty, seen.insert(url).inserted else { continue }
+                    let title = (annotation["title"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    out.append(Result(title: title.isEmpty ? url : title, url: url, snippet: ""))
+                    if out.count >= max { return out }
+                }
+            }
+        }
+        return out
     }
 
     // MARK: - Parsers
@@ -448,8 +617,8 @@ enum WebSearchTool {
     }
 
     /// `{query}` / `{q}` / `{key}` template expansion. When the template names no
-    /// query placeholder the query is appended as `q=`, which is what most
-    /// self-hosted search endpoints accept.
+    /// query placeholder the query is appended as `q=` — what most self-hosted
+    /// search endpoints accept.
     static func expandCustomURL(template: String, query: String, key: String = "") -> String {
         let q = urlEncode(query)
         let k = urlEncode(key)
@@ -466,6 +635,16 @@ enum WebSearchTool {
         return url
     }
 
+    /// [T-ios-web-search] Walk an arbitrary provider payload for hit arrays.
+    ///
+    /// Deliberately a MERGE, not a first-match: You and Firecrawl both publish
+    /// `results.web` AND `results.news` (or `data.web` + `data.news`) and their
+    /// clients show both, so stopping at the first non-empty array would silently
+    /// drop half of every answer. Deduplicated by URL in encounter order.
+    ///
+    /// No early searx/bing short-circuit here: those parsers only read their own
+    /// snippet field, so letting them win would throw away a provider's
+    /// `excerpts`/`markdown` text before `parseResultArray` saw it.
     static func parseGenericSearchJSON(_ json: String, max: Int) -> [Result] {
         let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("["),
@@ -473,45 +652,61 @@ enum WebSearchTool {
            let arr = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] {
             return parseResultArray(arr, max: max)
         }
-        let fromSearx = parseSearxJSON(json, max: max)
-        if !fromSearx.isEmpty { return fromSearx }
-        let fromBing = parseBingJSON(json, max: max)
-        if !fromBing.isEmpty { return fromBing }
         guard let data = json.data(using: .utf8),
               let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return [] }
-        return findResultArray(node: root, max: max, depth: 0) ?? []
+        var merged: [String: Result] = [:]
+        var order: [String] = []
+        collectResults(node: root, max: max, depth: 0, into: &merged, order: &order)
+        return order.compactMap { merged[$0] }
     }
 
-    /// Keys that hold hit arrays in the wild. Bocha nests hits at
-    /// `data.webPages.value`, which a single flat pass misses.
-    private static let resultKeys = [
-        "results", "items", "data", "organic", "organic_results",
-        "webPages", "web", "search_result", "value",
-    ]
-
-    private static func findResultArray(node: [String: Any], max: Int, depth: Int) -> [Result]? {
-        if depth > 3 { return nil }
+    private static func collectResults(
+        node: [String: Any],
+        max: Int,
+        depth: Int,
+        into merged: inout [String: Result],
+        order: inout [String]
+    ) {
+        if merged.count >= max || depth > 4 { return }
         for key in resultKeys {
-            if let arr = node[key] as? [[String: Any]] {
-                let parsed = parseResultArray(arr, max: max)
-                if !parsed.isEmpty { return parsed }
+            guard let arr = node[key] as? [[String: Any]] else { continue }
+            for result in parseResultArray(arr, max: max) {
+                if merged.count >= max { return }
+                if merged[result.url] == nil {
+                    merged[result.url] = result
+                    order.append(result.url)
+                }
             }
         }
-        if depth == 3 { return nil }
         for key in resultKeys {
             guard let child = node[key] as? [String: Any] else { continue }
-            if let found = findResultArray(node: child, max: max, depth: depth + 1) { return found }
+            collectResults(node: child, max: max, depth: depth + 1, into: &merged, order: &order)
+            if merged.count >= max { return }
         }
-        return nil
     }
+
+    /// Hit-array keys seen across the provider set: Kelivo's
+    /// `results`/`items`/`data`/`organic`/`webPages`/`value` plus the ones its
+    /// extra services use — Kagi's `data.search`, Metaso's `webpages`, LinkUp's
+    /// `sources`, Querit's `results.result`, You/Firecrawl's `results.web` + `news`.
+    private static let resultKeys = [
+        "results", "items", "data", "organic", "organic_results",
+        "webPages", "web", "news", "search_result", "value", "sources",
+        "webpages", "search", "result", "references", "citations",
+    ]
 
     private static func parseResultArray(_ arr: [[String: Any]], max: Int) -> [Result] {
         var out: [Result] = []
         for item in arr {
-            let url = firstNonEmpty(item, ["url", "link", "href", "displayUrl"])
-            let title = firstNonEmpty(item, ["title", "name"])
+            let url = firstNonEmpty(item, ["url", "link", "href", "displayUrl", "Url"])
+            let title = firstNonEmpty(item, ["title", "name", "Title"])
             guard !url.isEmpty, !title.isEmpty else { continue }
-            let snippet = firstNonEmpty(item, ["snippet", "content", "description", "summary", "text"])
+            var snippet = firstNonEmpty(item, ["snippet", "content", "description", "summary", "text"])
+            if snippet.isEmpty, let excerpts = item["excerpts"] as? [String], let first = excerpts.first {
+                // Parallel returns `excerpts` (a list).
+                snippet = first
+            }
+            if snippet.isEmpty { snippet = firstNonEmpty(item, ["markdown", "sentence"]) }
             out.append(Result(title: title, url: url, snippet: snippet))
             if out.count >= max { break }
         }
@@ -526,9 +721,8 @@ enum WebSearchTool {
         return ""
     }
 
-    /// DuckDuckGo's HTML and Lite endpoints, plus the generic `<a>` rows the
-    /// Lite page uses. Regexes are the Android twins', kept identical so a
-    /// markup change breaks both platforms at once instead of one silently.
+    /// DuckDuckGo's HTML and Lite endpoints. Regexes are the Android twins',
+    /// kept identical so a markup change breaks both platforms at once.
     static func parseHTML(_ html: String, max: Int = maxResults) -> [Result] {
         var out: [Result] = []
         var seen = Set<String>()
@@ -551,6 +745,21 @@ enum WebSearchTool {
             let title = stripTags(match[2])
             guard !url.isEmpty, !title.isEmpty, seen.insert(url).inserted else { continue }
             out.append(Result(title: title, url: url, snippet: ""))
+            if out.count >= max { break }
+        }
+        return out
+    }
+
+    /// Shared by the Bing-HTML engine and the no-key Bing fallback.
+    static func parseHTMLLinks(_ html: String, max: Int, pattern: String) -> [Result] {
+        guard max > 0 else { return [] }
+        var out: [Result] = []
+        for match in matches(pattern, in: html) where match.count >= 3 {
+            let link = match[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard link.hasPrefix("http"), !link.contains("bing.com/ck/"), !link.contains("microsoft.com") else { continue }
+            let title = stripTags(match[2])
+            guard !title.isEmpty else { continue }
+            out.append(Result(title: title, url: link, snippet: ""))
             if out.count >= max { break }
         }
         return out
@@ -622,16 +831,28 @@ enum WebSearchTool {
 
     private static func searchHTMLLinks(url: String, max: Int, pattern: String) async -> [Result] {
         guard max > 0, let html = await fetch(url) else { return [] }
-        var out: [Result] = []
-        for match in matches(pattern, in: html) where match.count >= 3 {
-            let link = match[1].trimmingCharacters(in: .whitespacesAndNewlines)
-            guard link.hasPrefix("http"), !link.contains("bing.com/ck/"), !link.contains("microsoft.com") else { continue }
-            let title = stripTags(match[2])
-            guard !link.isEmpty, !title.isEmpty else { continue }
-            out.append(Result(title: title, url: link, snippet: ""))
-            if out.count >= max { break }
+        return parseHTMLLinks(html, max: max, pattern: pattern)
+    }
+
+    private static func searchDuckDuckGo(query: String, max: Int) async -> Attempt {
+        let urls = [
+            "https://html.duckduckgo.com/html/?q=\(urlEncode(query))",
+            "https://lite.duckduckgo.com/lite/?q=\(urlEncode(query))",
+        ]
+        var last = "DuckDuckGo returned no cards"
+        var sawBody = false
+        for url in urls {
+            guard let html = await fetch(url) else { continue }
+            sawBody = true
+            if html.contains("anomaly.js") || html.contains("Unfortunately, bots use DuckDuckGo") {
+                last = "DuckDuckGo blocked this client. Set a backend in Settings → Web search."
+                continue
+            }
+            let parsed = parseHTML(html, max: max)
+            if !parsed.isEmpty { return Attempt(results: parsed, error: nil) }
         }
-        return out
+        if !sawBody { last = "empty response from DuckDuckGo" }
+        return Attempt(results: [], error: last)
     }
 
     // MARK: - Formatting helpers

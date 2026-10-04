@@ -2,14 +2,18 @@ import SwiftUI
 
 // MARK: - [T-ios-web-search] Settings › Tools › Web search
 
-/// Engine + credentials for the `web_search` tool. Android twin:
+/// Which backend `web_search` uses, and its credentials. Android twin:
 /// `ui/settings/WebSearchSettingsScreen.kt` — same engines, same fields, same
-/// wording, so the two clients describe one contract to the user.
+/// rules, so the two clients describe one contract to the user.
 ///
-/// List = engines (tap one to configure it); the detail page carries the
-/// "use this engine" switch and the credential field. DuckDuckGo needs no key
-/// and is the default, so a fresh install works without ever opening this
-/// screen.
+/// Engine NAMES come from `WebSearchEngine.displayName` rather than one localized
+/// string per provider: they are product names ("Tavily", "Kagi", "You.com"), so
+/// translating them would be dozens of keys of nothing in every language.
+///
+/// Keyed backends take a BATCH of keys — one per line, or pasted from a column —
+/// and `SearchKeyRotator` rotates them per request. The list under the field shows
+/// each key masked, so a user can see how many are configured without the screen
+/// displaying any of them.
 struct WebSearchSettingsView: View {
     @State private var engine: WebSearchEngine = WebSearchSettings.engine
     @State private var fallback: Bool = WebSearchSettings.fallbackEnabled
@@ -23,7 +27,7 @@ struct WebSearchSettingsView: View {
                     } label: {
                         HStack(spacing: 10) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(Self.label(item))
+                                Text(item.displayName)
                                 Text(subtitle(for: item))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -40,15 +44,15 @@ struct WebSearchSettingsView: View {
             } header: {
                 Text(AppLocalized("Engine"))
             } footer: {
-                Text(AppLocalized("Tap an engine to configure it. DuckDuckGo needs no key. SearXNG needs an instance URL. Bing needs an API key. Custom uses a URL template with {query}. Failed searches fall back to DuckDuckGo, then suggest browser_use."))
+                Text(AppLocalized("Tap an engine to configure it. DuckDuckGo and Bing's HTML page need no key. SearXNG needs an instance URL. The rest need an API key — paste several, one per line, and they are rotated per request. Failed searches fall back to DuckDuckGo, then suggest browser_use."))
             }
 
             Section {
                 Toggle(AppLocalized("Fallback to DuckDuckGo"), isOn: $fallback)
-                    // iOS 16 form (the two-parameter closure is iOS 17+), which
-                    // is what every other call site in this repo uses.
+                    // iOS 16 form (the two-parameter closure is iOS 17+), which is
+                    // what every other call site in this repo uses.
                     .onChange(of: fallback) { newValue in
-                        WebSearchSettings.setFallbackEnabled(newValue)
+                        WebSearchSettings.fallbackEnabled = newValue
                     }
             } footer: {
                 Text(AppLocalized("If the selected engine fails, retry DuckDuckGo. Empty results still recommend browser_use on a known URL."))
@@ -64,10 +68,10 @@ struct WebSearchSettingsView: View {
         }
     }
 
-    /// Configured / not-configured line under each engine, mirroring Android.
+    /// Configured / how many keys, under each engine row.
     private func subtitle(for item: WebSearchEngine) -> String {
         switch item {
-        case .ddg:
+        case .ddg, .bingLocal:
             return AppLocalized("No API key needed")
         case .searxng:
             return WebSearchSettings.searxngURL.isEmpty
@@ -78,24 +82,12 @@ struct WebSearchSettingsView: View {
                 ? AppLocalized("Not configured")
                 : AppLocalized("Configured")
         default:
-            return WebSearchSettings.apiKey(for: item).isEmpty
-                ? AppLocalized("Not configured")
-                : AppLocalized("Configured")
-        }
-    }
-
-    static func label(_ engine: WebSearchEngine) -> String {
-        switch engine {
-        case .ddg: return AppLocalized("DuckDuckGo HTML")
-        case .searxng: return AppLocalized("SearXNG")
-        case .bing: return AppLocalized("Bing Web Search API")
-        case .tavily: return AppLocalized("Tavily")
-        case .bocha: return AppLocalized("Bocha")
-        case .exa: return AppLocalized("Exa")
-        case .brave: return AppLocalized("Brave Search")
-        case .jina: return AppLocalized("Jina Search")
-        case .zhipu: return AppLocalized("Zhipu Web Search")
-        case .custom: return AppLocalized("Custom")
+            let count = WebSearchSettings.keys(for: item).count
+            if count == 0 { return AppLocalized("Not configured") }
+            if count == 1 { return AppLocalized("Configured") }
+            // Multiple keys are the point of the rotation: say how many rather
+            // than hiding the difference behind "Configured".
+            return AppLocalized("\(count) keys configured")
         }
     }
 
@@ -103,28 +95,31 @@ struct WebSearchSettingsView: View {
         switch engine {
         case .ddg:
             return AppLocalized("HTML search with no credentials. Default engine.")
+        case .bingLocal:
+            return AppLocalized("Bing public HTML results page — no API key. The paid Web Search API is a separate engine in the list.")
         case .searxng:
-            return AppLocalized("Public or self-hosted SearXNG instance. Paste the search endpoint or site origin.")
-        case .bing:
-            return AppLocalized("Microsoft Bing Web Search v7 subscription key.")
+            return AppLocalized("Public or self-hosted SearXNG instance. Paste the search endpoint or site origin; add user:password if the instance needs Basic auth.")
         case .custom:
             return AppLocalized("Use {query} (and optional {key}) in the URL. JSON arrays named results/items/data are parsed; HTML falls back to DuckDuckGo-style cards. If the header is Authorization, the key is sent as Bearer.")
         default:
-            return AppLocalized("\(Self.label(engine)) is a first-class backend. Paste its API key, then turn on \"Use this engine\". DuckDuckGo stays the no-key fallback when fallback is enabled.")
+            return AppLocalized("\(engine.displayName) is a first-class backend. Paste its API key (several keys, one per line, are rotated per request), then turn on \"Use this engine\". DuckDuckGo stays the no-key fallback when fallback is enabled.")
         }
     }
 }
 
-/// One engine's page: "use this engine" + its credential field(s).
+/// One engine's page: "use this engine", its keys (batch), and — where the
+/// provider allows it — an endpoint override.
 private struct WebSearchEngineDetailView: View {
     let engine: WebSearchEngine
     @Binding var selected: WebSearchEngine
 
+    @State private var keysText: String = ""
     @State private var searxngURL: String = WebSearchSettings.searxngURL
-    @State private var apiKey: String = ""
+    @State private var searxngAuth: String = WebSearchSettings.searxngAuth
     @State private var customURL: String = WebSearchSettings.customURL
     @State private var customKey: String = WebSearchSettings.customKey
     @State private var customKeyHeader: String = WebSearchSettings.customKeyHeader
+    @State private var urlOverride: String = ""
 
     var body: some View {
         Form {
@@ -143,19 +138,51 @@ private struct WebSearchEngineDetailView: View {
                 Text(WebSearchSettingsView.detailFooter(engine))
             }
 
-            Section {
-                switch engine {
-                case .ddg:
-                    EmptyView()
-                case .searxng:
+            if engine.needsKey {
+                Section {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(AppLocalized("API keys (one per line — they rotate)"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextEditor(text: $keysText)
+                            .font(.system(.footnote, design: .monospaced))
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .frame(minHeight: 80)
+                            .onChange(of: keysText) { newValue in
+                                WebSearchSettings.setKeys(newValue, for: engine)
+                            }
+                    }
+                    let stored = WebSearchSettings.parseKeyBatch(keysText)
+                    if stored.count > 1 {
+                        Text(AppLocalized("\(stored.count) keys — rotated per request"))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(stored, id: \.self) { key in
+                        Text(WebSearchSettings.maskKey(key))
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text(AppLocalized("Credentials"))
+                }
+            }
+
+            switch engine {
+            case .searxng:
+                Section {
                     field(AppLocalized("SearXNG URL"), text: $searxngURL, placeholder: "https://searx.example/search") {
                         WebSearchSettings.searxngURL = $0
                     }
-                case .bing, .tavily, .bocha, .exa, .brave, .jina, .zhipu:
-                    field(AppLocalized("API key"), text: $apiKey, placeholder: AppLocalized("Paste the provider API key")) {
-                        WebSearchSettings.setAPIKey($0, for: engine)
+                    field(AppLocalized("Basic auth (optional)"), text: $searxngAuth, placeholder: "user:password") {
+                        WebSearchSettings.searxngAuth = $0
                     }
-                case .custom:
+                } header: {
+                    Text(AppLocalized("Endpoints"))
+                }
+            case .custom:
+                Section {
                     field(AppLocalized("Search URL"), text: $customURL, placeholder: "https://example.com/search?q={query}") {
                         WebSearchSettings.customURL = $0
                     }
@@ -165,18 +192,31 @@ private struct WebSearchEngineDetailView: View {
                     field(AppLocalized("API key header (optional)"), text: $customKeyHeader, placeholder: "Authorization") {
                         WebSearchSettings.customKeyHeader = $0
                     }
+                } header: {
+                    Text(AppLocalized("Endpoints"))
                 }
-            } header: {
-                Text(AppLocalized("Endpoints"))
+            default:
+                if engine.urlOverrideKey != nil {
+                    Section {
+                        field(AppLocalized("Endpoint URL (optional)"), text: $urlOverride, placeholder: engine.defaultURL ?? "") {
+                            WebSearchSettings.setURLOverride($0, for: engine)
+                        }
+                    } header: {
+                        Text(AppLocalized("Endpoints"))
+                    } footer: {
+                        Text(AppLocalized("Blank uses the documented endpoint for this provider. Set it to point at a self-hosted gateway or proxy."))
+                    }
+                }
             }
         }
-        .navigationTitle(WebSearchSettingsView.label(engine))
+        .navigationTitle(engine.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            // Credentials are read once per visit: the key never round-trips
-            // through the view while the user types, so a failed save cannot
-            // leave a half-typed key in storage.
-            apiKey = WebSearchSettings.apiKey(for: engine)
+            // Credentials and overrides are read once per visit; the key list is
+            // written on every change so a failed save cannot leave a half-typed
+            // key behind.
+            keysText = WebSearchSettings.keys(for: engine).joined(separator: "\n")
+            urlOverride = WebSearchSettings.urlOverride(for: engine)
         }
     }
 
@@ -196,8 +236,8 @@ private struct WebSearchEngineDetailView: View {
                 .autocorrectionDisabled()
                 .font(.system(.footnote, design: .monospaced))
                 .onSubmit { onCommit(text.wrappedValue) }
-                // Persist on every change as well: a user who types a key and
-                // leaves the screen by the back gesture never fires onSubmit.
+                // Persist on every change as well: a user who types a value and
+                // leaves by the back gesture never fires onSubmit.
                 .onChange(of: text.wrappedValue) { newValue in onCommit(newValue) }
         }
     }
