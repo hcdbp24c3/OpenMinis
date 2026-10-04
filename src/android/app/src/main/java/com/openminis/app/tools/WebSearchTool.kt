@@ -141,11 +141,7 @@ object WebSearchTool {
                         "https://www.bing.com/search?q=${enc(query)}&setlang=zh-Hans",
                         context = context,
                     ) ?: return Attempt(emptyList(), "empty response from Bing HTML")
-                    val parsed = parseHtmlLinks(
-                        html,
-                        max,
-                        Regex("""<h2>\s*<a[^>]+href="(https?://[^"]+)"[^>]*>(.*?)</a>""", RegexOption.IGNORE_CASE),
-                    )
+                    val parsed = parseBingHtml(html, max)
                     Attempt(parsed, if (parsed.isEmpty()) "Bing HTML returned no results" else null)
                 }
 
@@ -806,12 +802,8 @@ object WebSearchTool {
         val out = mutableListOf<Result>()
         out += searchWikipedia(query, max, context)
         if (out.size < max) {
-            out += searchHtmlLinks(
-                "https://www.bing.com/search?q=${enc(query)}&setlang=zh-Hans",
-                max - out.size,
-                context,
-                Regex("""<h2>\s*<a[^>]+href="(https?://[^"]+)"[^>]*>(.*?)</a>""", RegexOption.IGNORE_CASE),
-            )
+            val bingHtml = fetchUrl("https://www.bing.com/search?q=${enc(query)}&setlang=zh-Hans", context = context)
+            if (bingHtml != null) out += parseBingHtml(bingHtml, max - out.size)
         }
         if (out.size < max) {
             out += searchHtmlLinks(
@@ -856,7 +848,44 @@ object WebSearchTool {
         return parseHtmlLinks(html, max, pattern)
     }
 
-    /** Shared by the Bing-HTML engine and the no-key Bing fallback. */
+    /**
+     * [T-android-web-search] Bing's HTML results.
+     *
+     * Verified against the live endpoint (2026-10-04): Bing now wraps the heading
+     * in the link — `<a href="https://…"><h2 …>Title</h2></a>` — where it used to
+     * be the other way round (`<h2><a href="…">Title</a></h2>`, the shape Kelivo
+     * and the OpenMinis-Linux fork both parse). With only the old pattern, the
+     * "Bing is free" engine returned ZERO results from a real response: the page
+     * had five result blocks and the regex matched none of them.
+     *
+     * Both orders are accepted, and the current one is tried first, so a template
+     * rollback does not empty the engine again. Bing serves direct URLs here (no
+     * `bing.com/ck/` redirect wrapper) — the filter stays as a guard.
+     */
+    internal fun parseBingHtml(html: String, max: Int = MAX_RESULTS): List<Result> {
+        val out = ArrayList<Result>(max)
+        val seen = HashSet<String>()
+        val patterns = listOf(
+            Regex("""<a[^>]+href="(https?://[^"]+)"[^>]*>\s*<h2[^>]*>([\s\S]*?)</h2>""", RegexOption.IGNORE_CASE),
+            Regex("""<h2[^>]*>\s*<a[^>]+href="(https?://[^"]+)"[^>]*>([\s\S]*?)</a>""", RegexOption.IGNORE_CASE),
+        )
+        for (pattern in patterns) {
+            for (match in pattern.findAll(html)) {
+                val link = match.groupValues.getOrNull(1)?.trim().orEmpty()
+                if (!link.startsWith("http")) continue
+                if (link.contains("bing.com/ck/") || link.contains("microsoft.com")) continue
+                val title = stripTags(match.groupValues.getOrNull(2).orEmpty())
+                if (title.isBlank()) continue
+                if (!seen.add(link)) continue
+                out += Result(title, link, "")
+                if (out.size >= max) return out
+            }
+            if (out.isNotEmpty()) return out
+        }
+        return out
+    }
+
+    /** Shared by the no-key Bing fallback. */
     internal fun parseHtmlLinks(html: String, max: Int, pattern: Regex): List<Result> {
         if (max <= 0) return emptyList()
         val out = mutableListOf<Result>()

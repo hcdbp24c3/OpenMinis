@@ -130,11 +130,7 @@ enum WebSearchTool {
             guard let html = await fetch("https://www.bing.com/search?q=\(urlEncode(query))&setlang=zh-Hans") else {
                 return Attempt(results: [], error: "empty response from Bing HTML")
             }
-            let parsed = parseHTMLLinks(
-                html,
-                max: max,
-                pattern: "<h2>\\s*<a[^>]+href=\"(https?://[^\"]+)\"[^>]*>(.*?)</a>"
-            )
+            let parsed = parseBingHTML(html, max: max)
             return Attempt(results: parsed, error: parsed.isEmpty ? "Bing HTML returned no results" : nil)
 
         case .searxng:
@@ -750,7 +746,40 @@ enum WebSearchTool {
         return out
     }
 
-    /// Shared by the Bing-HTML engine and the no-key Bing fallback.
+    /// [T-ios-web-search] Bing's HTML results.
+    ///
+    /// Verified against the live endpoint (2026-10-04): Bing now wraps the heading
+    /// in the link — `<a href="https://…"><h2 …>Title</h2></a>` — where it used to
+    /// be the other way round (`<h2><a href="…">Title</a></h2>`, the shape Kelivo
+    /// and the OpenMinis-Linux fork both parse). With only the old pattern the
+    /// "Bing is free" engine returned ZERO results from a real response: the page
+    /// had five result blocks and the regex matched none of them.
+    ///
+    /// Both orders are accepted, current first, so a template rollback does not
+    /// empty the engine again. Bing serves direct URLs here (no `bing.com/ck/`
+    /// redirect wrapper) — the filter stays as a guard.
+    static func parseBingHTML(_ html: String, max: Int = maxResults) -> [Result] {
+        var out: [Result] = []
+        var seen = Set<String>()
+        let patterns = [
+            "<a[^>]+href=\"(https?://[^\"]+)\"[^>]*>\\s*<h2[^>]*>([\\s\\S]*?)</h2>",
+            "<h2[^>]*>\\s*<a[^>]+href=\"(https?://[^\"]+)\"[^>]*>([\\s\\S]*?)</a>",
+        ]
+        for pattern in patterns {
+            for match in matches(pattern, in: html) where match.count >= 3 {
+                let link = match[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                guard link.hasPrefix("http"), !link.contains("bing.com/ck/"), !link.contains("microsoft.com") else { continue }
+                let title = stripTags(match[2])
+                guard !title.isEmpty, seen.insert(link).inserted else { continue }
+                out.append(Result(title: title, url: link, snippet: ""))
+                if out.count >= max { return out }
+            }
+            if !out.isEmpty { return out }
+        }
+        return out
+    }
+
+    /// Shared by the no-key HTML fallbacks (Mojeek).
     static func parseHTMLLinks(_ html: String, max: Int, pattern: String) -> [Result] {
         guard max > 0 else { return [] }
         var out: [Result] = []
@@ -792,11 +821,8 @@ enum WebSearchTool {
         var out: [Result] = []
         out += await searchWikipedia(query: query, max: max)
         if out.count < max {
-            out += await searchHTMLLinks(
-                url: "https://www.bing.com/search?q=\(urlEncode(query))&setlang=zh-Hans",
-                max: max - out.count,
-                pattern: "<h2>\\s*<a[^>]+href=\"(https?://[^\"]+)\"[^>]*>(.*?)</a>"
-            )
+            let bingHTML = await fetch("https://www.bing.com/search?q=\(urlEncode(query))&setlang=zh-Hans")
+            if let bingHTML { out += parseBingHTML(bingHTML, max: max - out.count) }
         }
         if out.count < max {
             out += await searchHTMLLinks(

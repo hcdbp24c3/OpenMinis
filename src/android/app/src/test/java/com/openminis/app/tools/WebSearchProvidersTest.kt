@@ -173,6 +173,43 @@ class WebSearchProvidersTest {
         assertEquals("https://serper.example", WebSearchTool.parseGenericSearchJson(json, max = 5).single().url)
     }
 
+    // ── Bing's HTML results (the "Bing is free" engine) ──────────────────────
+
+    @Test
+    fun `bing html parses the current link-wraps-heading markup`() {
+        // Verbatim shape from the live endpoint (2026-10-04): the <a> WRAPS the
+        // <h2>. The older order (<h2><a href>) — the one Kelivo and the Linux fork
+        // parse — matched none of the five blocks on the real page, so this engine
+        // returned nothing at all until this test existed.
+        val html = """
+            <div class="b_algoheader"><a href="https://www.alpine-usa.com/" h="ID=SERP,5098.2">
+            <h2 class=""><strong>Alpine</strong> | Car Audio, Stereo, Speakers</h2></a></div>
+            <div class="b_caption"><p class="b_lineclamp3">Welcome to Alpine</p></div>
+        """.trimIndent()
+        val results = WebSearchTool.parseBingHtml(html, max = 5)
+        assertEquals(1, results.size)
+        assertEquals("https://www.alpine-usa.com/", results[0].url)
+        // Tags stripped from the title, entity-decoded.
+        assertEquals("Alpine | Car Audio, Stereo, Speakers", results[0].title)
+    }
+
+    @Test
+    fun `bing html still parses the legacy heading-wraps-link markup`() {
+        val html = """<h2><a href="https://legacy.example">Legacy Title</a></h2>"""
+        assertEquals("https://legacy.example", WebSearchTool.parseBingHtml(html, max = 5).single().url)
+    }
+
+    @Test
+    fun `bing html skips the redirect wrapper and microsoft links`() {
+        val html = """
+            <a href="https://www.bing.com/ck/a?u=abc"><h2>Redirect wrapper</h2></a>
+            <a href="https://www.microsoft.com/"><h2>Microsoft</h2></a>
+            <a href="https://real.example"><h2>Real</h2></a>
+        """.trimIndent()
+        val results = WebSearchTool.parseBingHtml(html, max = 5)
+        assertEquals(listOf("https://real.example"), results.map { it.url })
+    }
+
     // ── multiple keys ("multiple search") ───────────────────────────────────
 
     @Test
