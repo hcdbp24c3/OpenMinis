@@ -1878,6 +1878,8 @@
 
     <string name="agent_tools_web_search">Web search</string>
     <string name="agent_tools_web_search_footer">web_search returns titles, URLs and snippets in one request — usually far faster than opening a page with the browser tool. Tap Settings › Web search to pick an engine or add an API key.</string>
+    <string name="agent_tools_web_fetch">Web fetch</string>
+    <string name="agent_tools_web_fetch_footer">Fetch one URL and read it as text, markdown, raw HTML or pretty JSON — with custom headers, POST bodies, and an optional real-browser render for pages that need JavaScript. Cheaper than driving the browser and safer than curling from the terminal (private and metadata hosts are blocked).</string>
 
     <string name="web_search_api_keys">API keys (one per line — they rotate)</string>
     <string name="web_search_keys_configured">%1$d keys configured</string>

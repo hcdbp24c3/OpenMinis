@@ -4,6 +4,7 @@ import com.openminis.app.R
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.EditNote
@@ -62,6 +63,7 @@ internal fun toolAccentColor(toolName: String): Color = when (toolName) {
     "read_image" -> Color(0xFFAF52DE)
     "memory_write", "memory_get" -> Color(0xFFFF2D55)
     "web_search" -> Color(0xFF32ADE6)    // iOS: .cyan for search
+    "web_fetch" -> Color(0xFF5E5CE6)     // indigo: the reader, distinct from search
     // [T-sub-agents-v1] Current name + the pre-rename one still in shipped transcripts.
     "subagent_task", "delegate_task", "agent_status" -> HelperAccentStatic  // iOS: HelperAccent.color (electric violet)
     else -> Color(0xFF8E8E93)
@@ -77,6 +79,7 @@ internal fun toolIconFor(toolName: String) = when (toolName) {
     "read_image" -> Icons.Default.Image                // iOS: photo
     "memory_write", "memory_get" -> Icons.Default.Psychology // iOS: brain.head.profile
     "web_search" -> Icons.Default.Search               // iOS: magnifyingglass
+    "web_fetch" -> Icons.Default.Download              // iOS: arrow.down.doc
     "subagent_task", "delegate_task", "agent_status" -> Icons.Default.Groups  // iOS: person.2.wave.2
     else -> Icons.Default.Build
 }
@@ -97,6 +100,7 @@ internal fun toolIconResFor(toolName: String?): Int = when (toolName) {
     "read_image" -> R.drawable.ic_tool_image
     "memory_write", "memory_get" -> R.drawable.ic_tool_psychology
     "web_search" -> R.drawable.ic_tool_search
+    "web_fetch" -> R.drawable.ic_tool_search
     "subagent_task", "delegate_task", "agent_status" -> R.drawable.ic_tool_groups
     else -> R.drawable.ic_tool_build
 }
@@ -113,6 +117,7 @@ internal fun toolAccentColorInt(toolName: String?): Int = when (toolName) {
     "read_image" -> 0xFFAF52DE.toInt()
     "memory_write", "memory_get" -> 0xFFFF2D55.toInt()
     "web_search" -> 0xFF32ADE6.toInt()
+    "web_fetch" -> 0xFF5E5CE6.toInt()
     "subagent_task", "delegate_task", "agent_status" -> 0xFFAF52DE.toInt()
     else -> 0xFF8E8E93.toInt()
 }
@@ -137,6 +142,7 @@ internal fun friendlyToolTitleFor(toolName: String?): String = when (toolName) {
     "memory_write" -> "Write Memory"
     "memory_get" -> "Read Memory"
     "web_search" -> "Search Web"
+    "web_fetch" -> "Fetch URL"
     else -> toolName
         .split('_')
         .filter { it.isNotEmpty() }
@@ -154,6 +160,7 @@ internal fun toolDisplayName(toolName: String): String = when (toolName) {
     "memory_write" -> "memory"
     "memory_get" -> "memory"
     "web_search" -> "search"
+    "web_fetch" -> "fetcher"
     "subagent_task", "delegate_task", "agent_status" -> "agent"
     else -> toolName
 }
@@ -171,6 +178,7 @@ internal fun toolTitleLabel(toolName: String): String = when (toolName) {
     "read_image" -> "Minis is reading Image"
     "memory_write", "memory_get" -> "Minis is using Memory"
     "web_search" -> "Minis is using Search"
+    "web_fetch" -> "Minis is fetching a URL"
     "subagent_task", "delegate_task", "agent_status" -> "Minis is using an Agent"
     else -> "Minis is using ${toolDisplayName(toolName)}"
 }

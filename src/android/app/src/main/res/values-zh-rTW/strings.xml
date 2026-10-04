@@ -1940,6 +1940,8 @@
     <string name="agent_tools_browser_footer">在應用程式內建瀏覽器中瀏覽網頁：開啟頁面、閱讀內容、點擊與輸入。功能已穩定，預設開啟。關閉後該工具會從所有對話中移除，模型完全看不到它。</string>
     <string name="agent_tools_web_search">Web search</string>
     <string name="agent_tools_web_search_footer">web_search returns titles, URLs and snippets in one request — usually far faster than opening a page with the browser tool. Tap Settings › Web search to pick an engine or add an API key.</string>
+    <string name="agent_tools_web_fetch">Web fetch</string>
+    <string name="agent_tools_web_fetch_footer">Fetch one URL and read it as text, markdown, raw HTML or pretty JSON — with custom headers, POST bodies, and an optional real-browser render for pages that need JavaScript. Cheaper than driving the browser and safer than curling from the terminal (private and metadata hosts are blocked).</string>
     <string name="agent_tools_agents">代理任務</string>
     <string name="agent_tools_agents_footer">把獨立的子任務交給子代理，在其各自的隱藏工作階段中完成並回報結果。同一個工具也讓助理查看或停止已經派出的子代理。名冊在「設定 › 代理任務 › 子代理」中設定。</string>
     <string name="settings_agents">子代理任務</string>

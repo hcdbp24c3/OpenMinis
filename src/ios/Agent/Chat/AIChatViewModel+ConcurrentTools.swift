@@ -81,6 +81,31 @@ extension AIChatViewModel {
     /// concurrent child tasks). The outcome carries the toolResult part,
     /// snapshot, and cancellation flag so the dispatcher can collect them
     /// in original tool_use order after every child task completes.
+    /// [T-ios-web-fetch] Backs `web_fetch` with `render: true`: navigate in the real
+    /// browser engine, let the page settle, then read it back — text, or the
+    /// serialized DOM when the caller asked for HTML.
+    ///
+    /// Returns nil on any failure so WebFetchTool falls back to the plain request:
+    /// a degraded answer beats no answer.
+    private func renderPageForFetch(url: String, waitMs: Int, wantHtml: Bool) async -> String? {
+        do {
+            _ = try await browserTabPool.execute(action: BrowserActionInput(action: .navigate, url: url))
+            if waitMs > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(waitMs) * 1_000_000)
+            }
+            let action: BrowserAction = wantHtml ? .executeJS : .getText
+            let input = BrowserActionInput(
+                action: action,
+                script: wantHtml ? "return document.documentElement.outerHTML;" : nil
+            )
+            let result = try await browserTabPool.execute(action: input)
+            return result.success ? result.text : nil
+        } catch {
+            AppLogger(category: "WebFetch").warning("[web_fetch] render failed for \(url): \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     func executeSingleToolUse(
         tu: StreamResult.ToolEntry,
         msgIdx: Int,
@@ -656,6 +681,23 @@ extension AIChatViewModel {
                editedPath.contains("/skills/") && editedPath.hasSuffix("SKILL.md") {
                 await MainActor.run { SkillStore.shared.reload() }
             }
+
+        case "web_fetch":
+            // [T-ios-web-fetch] Not in the schema when off; a request built before
+            // the switch flipped can still name it.
+            guard AgentToolSwitch.isToolEnabled(tu.name) else {
+                toolOutput = Self.toolsDisabledMessage
+                toolSuccess = false
+                break
+            }
+            let fetchExecution = await WebFetchTool.execute(
+                argsJSON: argsJson,
+                render: { url, waitMs, wantHtml in
+                    await self.renderPageForFetch(url: url, waitMs: waitMs, wantHtml: wantHtml)
+                }
+            )
+            toolOutput = fetchExecution.output
+            toolSuccess = fetchExecution.success
 
         case "web_search":
             // [T-ios-web-search] Same belt-and-braces as browser_use below: not in

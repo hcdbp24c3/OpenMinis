@@ -1968,6 +1968,8 @@ class ChatViewModel(
             browserEnabled = com.openminis.app.tools.AgentToolSwitch.BROWSER.isEnabled(context),
             // [T-android-web-search] Same switch the dispatcher checks below.
             webSearchEnabled = com.openminis.app.tools.AgentToolSwitch.WEB_SEARCH.isEnabled(context),
+            // [T-android-web-fetch] Same switch the dispatcher checks below.
+            webFetchEnabled = com.openminis.app.tools.AgentToolSwitch.WEB_FETCH.isEnabled(context),
             // [T-sub-agents-v1] Rebuilt on every schema build (this property is
             // not cached), so renaming a sub agent takes effect on the next
             // request and the enum can never advertise a name the resolver
@@ -13175,6 +13177,20 @@ class ChatViewModel(
                 } else {
                     toolDisabledResult("web_search")
                 }
+            // [T-android-web-fetch] One URL in, readable content out — with headers,
+            // POST bodies, and an optional real-browser render for client-rendered
+            // pages. Previously the model had to curl this through the shell or open
+            // it in browser_use and copy the text.
+            "web_fetch" ->
+                if (com.openminis.app.tools.AgentToolSwitch.WEB_FETCH.isEnabled(context)) {
+                    com.openminis.app.tools.WebFetchTool.execute(
+                        argsJson,
+                        context,
+                        render = { url, waitMs, wantHtml -> renderPageForFetch(url, waitMs, wantHtml) },
+                    )
+                } else {
+                    toolDisabledResult("web_fetch")
+                }
             "memory_write" -> executeMemoryWriteTool(argsJson)
             // [T-sub-agents-v1] One tool, five actions. The legacy names are
             // accepted so a replayed call from a transcript written before the
@@ -14426,6 +14442,39 @@ class ChatViewModel(
                 "or tell the user it is turned off if the task requires it.",
             false,
         )
+
+    /**
+     * [T-android-web-fetch] Backs `web_fetch` with `render: true`: navigate in the
+     * real browser engine, let the page settle, then read it back — text, or the
+     * serialized DOM when the caller asked for HTML.
+     *
+     * Returns null on any failure so [com.openminis.app.tools.WebFetchTool] falls
+     * back to the plain request: a degraded answer beats no answer.
+     */
+    private suspend fun renderPageForFetch(url: String, waitMs: Int, wantHtml: Boolean): String? {
+        return try {
+            val navigate = com.openminis.app.browser.BrowserActionInput.parse(
+                """{"action":"navigate","url":${JSONObject.quote(url)}}""",
+            ) ?: return null
+            if (!browserTabPool.execute(navigate, owner = browserOwnerId).success) return null
+            if (waitMs > 0) kotlinx.coroutines.delay(waitMs.toLong())
+            val action = if (wantHtml) {
+                com.openminis.app.browser.BrowserActionInput.parse(
+                    """{"action":"execute_js","script":"return document.documentElement.outerHTML;"}""",
+                )
+            } else {
+                com.openminis.app.browser.BrowserActionInput.parse("""{"action":"get_text"}""")
+            } ?: return null
+            val result = browserTabPool.execute(action, owner = browserOwnerId)
+            if (result.success) result.text else null
+        } catch (e: Exception) {
+            com.openminis.app.logging.AppLogger.warning(
+                "WebFetch",
+                "[web_fetch] render failed for $url: ${e.message}",
+            )
+            null
+        }
+    }
 
     private suspend fun executeBrowserUseTool(argsJson: String): ToolExecutionResult {
         val input = BrowserActionInput.parse(argsJson)

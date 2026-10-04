@@ -415,6 +415,8 @@
 		E5TLS0001 /* ToolsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5TLS0011 /* ToolsSettingsView.swift */; };
 		E5WSR0001 /* WebSearchTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5WSR0011 /* WebSearchTool.swift */; };
 		E5WSS0001 /* WebSearchSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5WSS0011 /* WebSearchSettings.swift */; };
+		E5WFT0001 /* WebFetchTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5WFT0011 /* WebFetchTool.swift */; };
+		E5WFG0001 /* FetchUrlGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5WFG0011 /* FetchUrlGuard.swift */; };
 		E5WSV0001 /* WebSearchSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5WSV0011 /* WebSearchSettingsView.swift */; };
 		E5TRC001 /* ThinkingRuleCoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5TRC002 /* ThinkingRuleCoding.swift */; };
 		E5TRC0010 /* ThinkingRulesCollection.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5TRC0020 /* ThinkingRulesCollection.swift */; };
@@ -1142,6 +1144,8 @@
 		E5TLS0011 /* ToolsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolsSettingsView.swift; sourceTree = "<group>"; };
 		E5WSR0011 /* WebSearchTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchTool.swift; sourceTree = "<group>"; };
 		E5WSS0011 /* WebSearchSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchSettings.swift; sourceTree = "<group>"; };
+		E5WFT0011 /* WebFetchTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebFetchTool.swift; sourceTree = "<group>"; };
+		E5WFG0011 /* FetchUrlGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FetchUrlGuard.swift; sourceTree = "<group>"; };
 		E5WSV0011 /* WebSearchSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchSettingsView.swift; sourceTree = "<group>"; };
 		E5TRC002 /* ThinkingRuleCoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ThinkingRuleCoding.swift; path = Thinking/ThinkingRuleCoding.swift; sourceTree = "<group>"; };
 		E5TRC0020 /* ThinkingRulesCollection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ThinkingRulesCollection.swift; path = Config/Collections/ThinkingRulesCollection.swift; sourceTree = "<group>"; };
@@ -1659,6 +1663,8 @@
 				E5LD00003 /* ToolLoopDetector.swift */,
 				E5WSR0011 /* WebSearchTool.swift */,
 				E5WSS0011 /* WebSearchSettings.swift */,
+				E5WFT0011 /* WebFetchTool.swift */,
+				E5WFG0011 /* FetchUrlGuard.swift */,
 			);
 			path = Agent;
 			sourceTree = "<group>";
@@ -2889,6 +2895,8 @@
 				E5TLS0001 /* ToolsSettingsView.swift in Sources */,
 				E5WSR0001 /* WebSearchTool.swift in Sources */,
 				E5WSS0001 /* WebSearchSettings.swift in Sources */,
+				E5WFT0001 /* WebFetchTool.swift in Sources */,
+				E5WFG0001 /* FetchUrlGuard.swift in Sources */,
 				E5WSV0001 /* WebSearchSettingsView.swift in Sources */,
 				E5VMB0002 /* AIChatViewModel+Fallback.swift in Sources */,
 				E5VMB0003 /* AIChatViewModel+Misc.swift in Sources */,

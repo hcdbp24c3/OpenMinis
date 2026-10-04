@@ -29,6 +29,11 @@ enum class AgentToolSwitch(val key: String, val defaultValue: Boolean) {
      *  backend (DuckDuckGo) needs no key and the alternative for a fact is the
      *  browser tool, which is minutes of page-loading instead of one request. */
     WEB_SEARCH("agent.tools.websearch.enabled", true),
+
+    /** [T-android-web-fetch] web_fetch — the dedicated reader for one URL, which
+     *  replaces curling through the terminal or opening the page in the browser.
+     *  On by default: it is the cheap path, and it is SSRF-guarded. */
+    WEB_FETCH("agent.tools.webfetch.enabled", true),
     ;
 
     fun isEnabled(context: Context): Boolean =
@@ -48,6 +53,7 @@ enum class AgentToolSwitch(val key: String, val defaultValue: Boolean) {
         fun governing(toolName: String): AgentToolSwitch? = when (toolName) {
             "browser_use" -> BROWSER
             "web_search" -> WEB_SEARCH
+            "web_fetch" -> WEB_FETCH
             // [T-sub-agents-v1] The renamed tool plus the two names
             // shipped builds wrote, so the switch still governs a
             // replayed call from an older transcript.

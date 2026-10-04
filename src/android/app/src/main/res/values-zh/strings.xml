@@ -1917,6 +1917,8 @@
     <string name="agent_tools_browser_footer">在应用内浏览器中访问网页：打开页面、阅读内容、点击和输入。功能已稳定，默认开启。关闭后该工具会从所有对话中移除，模型完全看不到它。</string>
     <string name="agent_tools_web_search">Web search</string>
     <string name="agent_tools_web_search_footer">web_search returns titles, URLs and snippets in one request — usually far faster than opening a page with the browser tool. Tap Settings › Web search to pick an engine or add an API key.</string>
+    <string name="agent_tools_web_fetch">网页抓取</string>
+    <string name="agent_tools_web_fetch_footer">抓取单个网址并按文本、Markdown、原始 HTML 或格式化 JSON 返回 —— 支持自定义请求头、POST 请求体，以及为需要 JavaScript 的页面启用真实浏览器渲染。比驱动浏览器更快，也比在终端里 curl 更安全（内网与元数据地址会被拦截）。</string>
     <string name="agent_tools_agents">代理任务</string>
     <string name="agent_tools_agents_footer">把独立的子任务交给子代理，在其各自的隐藏会话中完成并回报结果。同一个工具也让助手查看或停止已经派出的子代理。名册在“设置 › 代理任务 › 子代理”中配置。</string>
     <string name="settings_agents">子代理任务</string>

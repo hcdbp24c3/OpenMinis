@@ -44,6 +44,10 @@ object AgentTools {
         // the dispatcher checks the same switch, so a replayed call cannot
         // execute a tool the user turned off.
         webSearchEnabled: Boolean = true,
+        // [T-android-web-fetch] Settings › Agent Tools › Web fetch. Same gate as
+        // the other network tools: the schema builder and the dispatcher read the
+        // one switch, so a replayed call cannot run a disabled tool.
+        webFetchEnabled: Boolean = true,
         // [T-sub-agents-v1] The names of the enabled sub agents, in roster
         // order. These become `subagent_task.agent`'s enum, and the caller
         // rebuilds them every turn: the schema is not cached, so a rename takes
@@ -64,6 +68,10 @@ object AgentTools {
         // browser for a fact; the description tells the model to prefer this and
         // to reach for browser_use only when it must interact with a page.
         if (webSearchEnabled) add(WebSearchTool.definition())
+        // [T-android-web-fetch] The one-URL reader. The description tells the model
+        // to reach for this before the shell or the browser, which is the whole
+        // point: those two were the previous ways to read a page.
+        if (webFetchEnabled) add(WebFetchTool.definition())
         if (memoryEnabled) {
             if (!isHelper) add(memoryWriteDefinition())
             add(memoryGetDefinition())

@@ -221,6 +221,11 @@ extension AIChatViewModel {
             tools.append(WebSearchTool.definition())
         }
 
+        // [T-ios-web-fetch] The one-URL reader, gated the same way.
+        if Self.toolEnabled(.webFetch) {
+            tools.append(WebFetchTool.definition())
+        }
+
         // [T-p1-delegate-task] Depth = 1: a helper never sees this tool.
         // [T-tools-granular-switches] Settings › Tools › Agents removes it
         // globally (agent_status rides with it — pointless without

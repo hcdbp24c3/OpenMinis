@@ -1975,6 +1975,8 @@
     <string name="agent_tools_browser_footer">Pregledavanje weba u ugrađenom pregledniku: otvaranje stranica, čitanje, klikanje i upisivanje. Stabilno i uključeno po zadanom. Kad je isključeno, alat se uklanja iz svakog razgovora — model ga uopće ne vidi.</string>
     <string name="agent_tools_web_search">Web search</string>
     <string name="agent_tools_web_search_footer">web_search returns titles, URLs and snippets in one request — usually far faster than opening a page with the browser tool. Tap Settings › Web search to pick an engine or add an API key.</string>
+    <string name="agent_tools_web_fetch">Web fetch</string>
+    <string name="agent_tools_web_fetch_footer">Fetch one URL and read it as text, markdown, raw HTML or pretty JSON — with custom headers, POST bodies, and an optional real-browser render for pages that need JavaScript. Cheaper than driving the browser and safer than curling from the terminal (private and metadata hosts are blocked).</string>
     <string name="agent_tools_agents">Agenti</string>
     <string name="agent_tools_agents_footer">Predajte zaokružene podzadatke podagentima koji rade u vlastitim skrivenim sesijama i javljaju rezultat. Isti alat asistentu omogućuje i provjeru ili zaustavljanje pokrenutog. Popis postavite u Postavke › Agenti › Podagenti.</string>
     <string name="settings_agents">Podagenti</string>

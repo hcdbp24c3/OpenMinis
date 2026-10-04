@@ -34,6 +34,9 @@ enum AgentToolSwitch: String, CaseIterable {
     /// [T-ios-web-search] web_search. Key string is byte-identical to Android's
     /// `AgentToolSwitch.WEB_SEARCH` so the choice syncs with a user's settings.
     case webSearch = "agent.tools.websearch.enabled"
+    /// [T-ios-web-fetch] web_fetch. Key string matches Android's
+    /// `AgentToolSwitch.WEB_FETCH`.
+    case webFetch = "agent.tools.webfetch.enabled"
 
     var key: String { rawValue }
 
@@ -61,6 +64,9 @@ enum AgentToolSwitch: String, CaseIterable {
         // [T-ios-web-search] ON, like Android: the default backend (DuckDuckGo)
         // needs no key, and the alternative for a fact is the browser tool.
         case .webSearch: return true
+        // [T-ios-web-fetch] ON: it is the cheap path for reading one URL, and it
+        // is SSRF-guarded.
+        case .webFetch: return true
         }
     }
 
@@ -81,6 +87,7 @@ enum AgentToolSwitch: String, CaseIterable {
         case "browser_use": return .browser
         case SubAgentDefinition.toolName: return .agents
         case WebSearchTool.name: return .webSearch
+        case WebFetchTool.name: return .webFetch
         default: return nil
         }
     }
@@ -125,6 +132,7 @@ enum AgentToolSwitch: String, CaseIterable {
 struct ToolsSettingsView: View {
     @AppStorage(AgentToolSwitch.browser.key) private var browserEnabled: Bool = AgentToolSwitch.browser.defaultValue
     @AppStorage(AgentToolSwitch.webSearch.key) private var webSearchEnabled: Bool = AgentToolSwitch.webSearch.defaultValue
+    @AppStorage(AgentToolSwitch.webFetch.key) private var webFetchEnabled: Bool = AgentToolSwitch.webFetch.defaultValue
 
     var body: some View {
         Form {
@@ -145,6 +153,13 @@ struct ToolsSettingsView: View {
                 }
             } footer: {
                 Text(AppLocalized("Search the web and get titles, URLs and snippets in one request — usually far faster than opening a page with the browser tool. Pick the engine and add API keys on the Search engine screen. Off removes the tool from every conversation."))
+            }
+            // [T-ios-web-fetch] The one-URL reader: headers, POST bodies, and an
+            // optional real-browser render for pages that need JavaScript.
+            Section {
+                toolRow(AppLocalized("Web Fetch"), tool: WebFetchTool.name, icon: "arrow.down.doc", isOn: $webFetchEnabled)
+            } footer: {
+                Text(AppLocalized("Fetch one URL and read it as text, markdown, raw HTML or pretty JSON — with custom headers, POST bodies, and an optional JavaScript render. Cheaper than driving the browser and safer than curling from the terminal (private and metadata hosts are blocked)."))
             }
             // [T-sub-agents-v1] No Agents section here, and deliberately not
             // even a read-only pointer row: the switch belongs to the Sub Agents

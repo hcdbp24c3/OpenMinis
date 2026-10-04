@@ -2111,6 +2111,8 @@
     <string name="agent_tools_browser_footer">Browse the web in the in-app browser: open pages, read them, click and type. Stable and on by default. When off, the tool is removed from every conversation — the model does not see it at all.</string>
     <string name="agent_tools_web_search">Web search</string>
     <string name="agent_tools_web_search_footer">web_search returns titles, URLs and snippets in one request — usually far faster than opening a page with the browser tool. Tap Settings › Web search to pick an engine or add an API key.</string>
+    <string name="agent_tools_web_fetch">Web fetch</string>
+    <string name="agent_tools_web_fetch_footer">Fetch one URL and read it as text, markdown, raw HTML or pretty JSON — with custom headers, POST bodies, and an optional real-browser render for pages that need JavaScript. Cheaper than driving the browser and safer than curling from the terminal (private and metadata hosts are blocked).</string>
     <string name="agent_tools_agents">Agents</string>
     <string name="agent_tools_agents_footer">Hand self-contained sub-tasks to sub agents that work in their own hidden sessions and report back. The same tool also lets the assistant check on or stop what it started. Configure the roster under Settings › Agents › Sub Agents.</string>
     <string name="settings_agents">Sub Agents</string>

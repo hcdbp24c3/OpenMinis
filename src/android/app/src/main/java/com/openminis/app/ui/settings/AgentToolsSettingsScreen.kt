@@ -34,6 +34,10 @@ fun AgentToolsSettingsScreen(onBack: () -> Unit) {
     var webSearchEnabled by remember {
         mutableStateOf(AgentToolSwitch.WEB_SEARCH.isEnabled(context))
     }
+    // [T-android-web-fetch] web_fetch — the one-URL reader.
+    var webFetchEnabled by remember {
+        mutableStateOf(AgentToolSwitch.WEB_FETCH.isEnabled(context))
+    }
 
     SettingsScaffold(title = stringResource(R.string.settings_agent_tools), onBack = onBack) {
         SettingsSection(footer = stringResource(R.string.agent_tools_browser_footer)) {
@@ -55,6 +59,17 @@ fun AgentToolsSettingsScreen(onBack: () -> Unit) {
                 onCheckedChange = {
                     webSearchEnabled = it
                     AgentToolSwitch.WEB_SEARCH.setEnabled(context, it)
+                },
+                showDivider = true,
+            )
+            // [T-android-web-fetch] Same section: one more way the agent may reach
+            // the network, and the cheapest one for reading a single page.
+            SettingsSwitchRow(
+                title = stringResource(R.string.agent_tools_web_fetch),
+                checked = webFetchEnabled,
+                onCheckedChange = {
+                    webFetchEnabled = it
+                    AgentToolSwitch.WEB_FETCH.setEnabled(context, it)
                 },
                 showDivider = false,
             )
