@@ -702,6 +702,60 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
 
     // MARK: - Published State
 
+    /// [T-ios-ask-user] The question the agent is currently blocked on, or nil.
+    ///
+    /// Exposed for the chat view, which presents it as a modal sheet: a model that
+    /// asked a question is really stopped (see `executeAskUserQuestion`), and a row
+    /// in the transcript would not say so.
+    @Published var pendingUserQuestions: [AskUserQuestion.Question]?
+
+    /// Completed by the sheet, or by skip/dismiss.
+    private var askUserContinuation: CheckedContinuation<String, Never>?
+
+    /// [T-ios-ask-user] The user answered: resume the parked tool call with the
+    /// JSON the model expects.
+    func submitUserQuestionAnswers(_ selections: [[String]]) {
+        guard let questions = pendingUserQuestions else { return }
+        let json = AskUserQuestion.formatAnswers(questions, selections: selections)
+        let continuation = askUserContinuation
+        askUserContinuation = nil
+        pendingUserQuestions = nil
+        continuation?.resume(returning: json)
+    }
+
+    /// The user dismissed the sheet: unblock the run and say so, never invent an answer.
+    func skipUserQuestions() {
+        dismissPendingUserQuestions(reason: "skipped")
+    }
+
+    private func dismissPendingUserQuestions(reason: String) {
+        let continuation = askUserContinuation
+        askUserContinuation = nil
+        pendingUserQuestions = nil
+        continuation?.resume(returning: "{\"answers\":[],\"status\":\"\(reason)\"}")
+    }
+
+    /// [T-ios-ask-user] Parks the agent loop until the sheet is answered.
+    ///
+    /// `withCheckedContinuation` + `defer` is what keeps a cancelled run (user
+    /// pressed stop, view model torn down) from leaving a pending question on
+    /// screen or a continuation nobody resumes.
+    func executeAskUserQuestion(argsJSON: String) async -> (output: String, success: Bool) {
+        guard let data = argsJSON.data(using: .utf8),
+              let params = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return ("ask_user_question: invalid JSON", false)
+        }
+        let questions = AskUserQuestion.parse(params)
+        guard !questions.isEmpty else {
+            return ("ask_user_question: no valid questions (need a question with at least 2 options)", false)
+        }
+        let json: String = await withCheckedContinuation { continuation in
+            self.askUserContinuation = continuation
+            self.pendingUserQuestions = questions
+        }
+        return (json, true)
+    }
+
     @Published var messages: [ChatMessage] = []
     /// [T-voice-input-mode-preference-ios] True when a voice session
     /// contributed to the CURRENT composition (set on recording start by any

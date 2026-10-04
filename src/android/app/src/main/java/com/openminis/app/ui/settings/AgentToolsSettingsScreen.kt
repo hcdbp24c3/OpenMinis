@@ -38,6 +38,14 @@ fun AgentToolsSettingsScreen(onBack: () -> Unit) {
     var webFetchEnabled by remember {
         mutableStateOf(AgentToolSwitch.WEB_FETCH.isEnabled(context))
     }
+    // [T-android-repo-digest] repo_digest — read a GitHub repo in one call.
+    var repoDigestEnabled by remember {
+        mutableStateOf(AgentToolSwitch.REPO.isEnabled(context))
+    }
+    // [T-android-ask-user] ask_user_question — the run pauses for an answer.
+    var askEnabled by remember {
+        mutableStateOf(AgentToolSwitch.ASK.isEnabled(context))
+    }
 
     SettingsScaffold(title = stringResource(R.string.settings_agent_tools), onBack = onBack) {
         SettingsSection(footer = stringResource(R.string.agent_tools_browser_footer)) {
@@ -70,6 +78,24 @@ fun AgentToolsSettingsScreen(onBack: () -> Unit) {
                 onCheckedChange = {
                     webFetchEnabled = it
                     AgentToolSwitch.WEB_FETCH.setEnabled(context, it)
+                },
+                showDivider = true,
+            )
+            SettingsSwitchRow(
+                title = stringResource(R.string.agent_tools_repo_digest),
+                checked = repoDigestEnabled,
+                onCheckedChange = {
+                    repoDigestEnabled = it
+                    AgentToolSwitch.REPO.setEnabled(context, it)
+                },
+                showDivider = true,
+            )
+            SettingsSwitchRow(
+                title = stringResource(R.string.agent_tools_ask),
+                checked = askEnabled,
+                onCheckedChange = {
+                    askEnabled = it
+                    AgentToolSwitch.ASK.setEnabled(context, it)
                 },
                 showDivider = false,
             )

@@ -324,6 +324,8 @@ struct AIChatView: View {
     // [T-p2-agent-in-toolbar] Agent blocks now live in the floating tool bar
     // like every other tool; this sheet target only serves the notification-
     // tap / debug-RPC `openHelperSheet` route.
+    /// [T-ios-ask-user] Mirrors `viewModel.pendingUserQuestions` for presentation.
+    @State private var askQuestionsTarget: AskQuestionsPayload?
     @State private var helperSheetTarget: HelperSheetTarget?
     // [T-p3-agent-callback-cell] Detail sheet for a tapped agent callback cell.
     @State private var agentCallbackDetail: AgentCallbackDetailTarget?
@@ -627,6 +629,19 @@ struct AIChatView: View {
                         // route now serves only openers that have no tool sheet
                         // of their own (notification tap, intent, debug RPC);
                         // opening from a tool sheet stacks on that sheet instead.
+                        // [T-ios-ask-user] The agent is parked on a question: show
+                        // it. Modal, not a transcript row — the run cannot continue
+                        // without an answer.
+                        .sheet(item: $askQuestionsTarget) { target in
+                            AskUserQuestionsSheet(
+                                questions: target.questions,
+                                onSubmit: { viewModel.submitUserQuestionAnswers($0) },
+                                onSkip: { viewModel.skipUserQuestions() }
+                            )
+                        }
+                        .onChange(of: viewModel.pendingUserQuestions) { questions in
+                            askQuestionsTarget = questions.map(AskQuestionsPayload.init(questions:))
+                        }
                         .sheet(item: $helperSheetTarget) { target in
                             HelperTranscriptPage(target: target)
                                 .helperTranscriptSheetStyle()

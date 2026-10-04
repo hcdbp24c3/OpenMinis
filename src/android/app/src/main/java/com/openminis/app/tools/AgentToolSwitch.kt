@@ -34,6 +34,15 @@ enum class AgentToolSwitch(val key: String, val defaultValue: Boolean) {
      *  replaces curling through the terminal or opening the page in the browser.
      *  On by default: it is the cheap path, and it is SSRF-guarded. */
     WEB_FETCH("agent.tools.webfetch.enabled", true),
+
+    /** [T-android-ask-user] ask_user_question — the tool that stops the run and
+     *  asks the user to choose. On by default: it is the difference between the
+     *  model guessing at a preference and asking for it. */
+    ASK("agent.tools.ask.enabled", true),
+
+    /** [T-android-repo-digest] repo_digest — read a GitHub repo as a digest.
+     *  On by default: it is the cheap alternative to cloning or browsing. */
+    REPO("agent.tools.repo.enabled", true),
     ;
 
     fun isEnabled(context: Context): Boolean =
@@ -54,6 +63,10 @@ enum class AgentToolSwitch(val key: String, val defaultValue: Boolean) {
             "browser_use" -> BROWSER
             "web_search" -> WEB_SEARCH
             "web_fetch" -> WEB_FETCH
+            // [T-android-ask-user] The alias is the MCP's original name, so a
+            // transcript or a model that learned the MCP spelling still resolves.
+            "ask_user_question", "AskUserQuestion" -> ASK
+            "repo_digest" -> REPO
             // [T-sub-agents-v1] The renamed tool plus the two names
             // shipped builds wrote, so the switch still governs a
             // replayed call from an older transcript.

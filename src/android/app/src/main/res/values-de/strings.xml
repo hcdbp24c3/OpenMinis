@@ -1909,4 +1909,19 @@
     <string name="web_search_url_override_footer">Blank uses the documented endpoint for this provider. Set it to point at a self-hosted gateway or proxy.</string>
     <string name="web_search_bing_local_detail">Bing public HTML results page — no API key. The paid Web Search API is a separate engine in the list.</string>
     <string name="web_search_searxng_auth">Basic auth (optional)</string>
+
+    <string name="ask_user_title">The agent needs your input</string>
+    <string name="ask_user_other">Other — type your own answer</string>
+    <string name="ask_user_submit">Submit</string>
+    <string name="ask_user_skip">Skip</string>
+    <string name="agent_tools_ask">Ask user</string>
+    <string name="agent_tools_ask_footer">Let the agent ask you a structured multiple-choice question when a choice is genuinely ambiguous (which option you prefer, which direction to take) instead of guessing. The run pauses until you answer or skip.</string>
+
+    <string name="settings_repo_digest">Repository digest</string>
+    <string name="settings_repo_digest_subtitle">GitHub token for the repo_digest tool</string>
+    <string name="repo_digest_token">GitHub token (optional)</string>
+    <string name="repo_digest_token_placeholder">ghp_… or github_pat_…</string>
+    <string name="repo_digest_token_footer">Without a token, public repositories still work: one GitHub API call per digest (60/hour, unauthenticated) plus file contents from the raw host, which is not part of that quota. A token raises the limit to 5000/hour and lets the tool read private repositories.</string>
+    <string name="agent_tools_repo_digest">Repository digest</string>
+    <string name="agent_tools_repo_digest_footer">Read a GitHub repository as a digest — file tree plus the contents that matter — in one call, instead of cloning it or browsing page by page. Binary, vendored, minified and lock files are skipped; include/exclude globs narrow it further.</string>
 </resources>

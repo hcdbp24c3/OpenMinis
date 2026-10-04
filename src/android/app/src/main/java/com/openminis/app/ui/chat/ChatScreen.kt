@@ -7592,6 +7592,17 @@ fun ChatScreen(
     }
 
     // Model Picker bottom sheet
+    // [T-android-ask-user] The agent is parked on a question: show it. Modal, not
+    // an inline card — the run cannot continue without an answer.
+    val pendingUserQuestions by viewModel.pendingUserQuestions.collectAsState()
+    pendingUserQuestions?.let { questions ->
+        AskUserQuestionsSheet(
+            questions = questions,
+            onSubmit = { viewModel.submitUserQuestionAnswers(it) },
+            onSkip = { viewModel.skipUserQuestions() },
+        )
+    }
+
     if (showModelPicker) {
         val config by providerRepository.config.collectAsState()
         val activeEntryId by viewModel.activeEntryId.collectAsState()

@@ -226,6 +226,17 @@ extension AIChatViewModel {
             tools.append(WebFetchTool.definition())
         }
 
+        // [T-ios-repo-digest] The repository reader, gated the same way.
+        if Self.toolEnabled(.repo) {
+            tools.append(RepoDigestTool.definition())
+        }
+
+        // [T-ios-ask-user] Listed last on purpose: it is the only tool that hands
+        // control back to the user mid-run, so it reads as an exception.
+        if Self.toolEnabled(.ask) {
+            tools.append(AskUserQuestion.definition())
+        }
+
         // [T-p1-delegate-task] Depth = 1: a helper never sees this tool.
         // [T-tools-granular-switches] Settings › Tools › Agents removes it
         // globally (agent_status rides with it — pointless without

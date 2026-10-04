@@ -175,6 +175,8 @@ object Routes {
     const val AGENT_TOOLS = "agent_tools"
     /** [T-android-web-search] Settings > Agent Runtime > Web search. */
     const val WEB_SEARCH = "web_search"
+    /** [T-android-repo-digest] Settings > Agent Runtime > Repository digest. */
+    const val REPO_DIGEST = "repo_digest"
     /** [T-mcp-integration-android] MCP Integrations management screen. */
     const val MCP = "mcp"
     /** [T-soul-md] SOUL.md editor. */
@@ -624,6 +626,7 @@ fun AppNavigation(
                 onAgentsClick = { navController.safeNavigate(Routes.AGENTS) },
                 onAgentToolsClick = { navController.safeNavigate(Routes.AGENT_TOOLS) },
                 onWebSearchClick = { navController.safeNavigate(Routes.WEB_SEARCH) },
+                onRepoDigestClick = { navController.safeNavigate(Routes.REPO_DIGEST) },
                 onMcpClick = { navController.safeNavigate(Routes.MCP) },
                 onSoulClick = { navController.safeNavigate(Routes.SOUL) },
                 onPermissionsClick = { navController.safeNavigate(Routes.PERMISSIONS) },
@@ -1476,6 +1479,13 @@ fun AppNavigation(
         // [T-android-web-search] Engine + credentials for the web_search tool.
         composable(Routes.WEB_SEARCH) {
             com.openminis.app.ui.settings.WebSearchSettingsScreen(
+                onBack = { navController.safePopBackStack() },
+            )
+        }
+
+        // [T-android-repo-digest] GitHub token for the repo_digest tool.
+        composable(Routes.REPO_DIGEST) {
+            com.openminis.app.ui.settings.RepoDigestSettingsScreen(
                 onBack = { navController.safePopBackStack() },
             )
         }

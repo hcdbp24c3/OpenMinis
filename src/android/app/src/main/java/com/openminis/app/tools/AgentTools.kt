@@ -48,6 +48,11 @@ object AgentTools {
         // the other network tools: the schema builder and the dispatcher read the
         // one switch, so a replayed call cannot run a disabled tool.
         webFetchEnabled: Boolean = true,
+        // [T-android-ask-user] Settings › Agent Tools › Ask user. The switch gates
+        // the schema and the dispatcher; the run blocks on the sheet when it runs.
+        askEnabled: Boolean = true,
+        // [T-android-repo-digest] Settings › Agent Tools › Repository digest.
+        repoDigestEnabled: Boolean = true,
         // [T-sub-agents-v1] The names of the enabled sub agents, in roster
         // order. These become `subagent_task.agent`'s enum, and the caller
         // rebuilds them every turn: the schema is not cached, so a rename takes
@@ -72,6 +77,13 @@ object AgentTools {
         // to reach for this before the shell or the browser, which is the whole
         // point: those two were the previous ways to read a page.
         if (webFetchEnabled) add(WebFetchTool.definition())
+        // [T-android-ask-user] Listed last on purpose: it is the only tool that
+        // hands control back to the user mid-run, so it reads as an exception.
+        if (askEnabled) add(AskUserQuestion.definition())
+        // [T-android-repo-digest] One call instead of a clone or a page-by-page
+        // browse; the description says so, because that is what the model needs to
+        // know to prefer it.
+        if (repoDigestEnabled) add(RepoDigestTool.definition())
         if (memoryEnabled) {
             if (!isHelper) add(memoryWriteDefinition())
             add(memoryGetDefinition())

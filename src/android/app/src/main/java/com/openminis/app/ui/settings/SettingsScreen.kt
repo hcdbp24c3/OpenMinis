@@ -39,6 +39,7 @@ import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Handyman
 import androidx.compose.material.icons.outlined.Psychology
@@ -90,6 +91,8 @@ fun SettingsScreen(
     onAgentToolsClick: () -> Unit = {},
     /** [T-android-web-search] Settings › Web search (engine + API keys). */
     onWebSearchClick: () -> Unit = {},
+    /** [T-android-repo-digest] Settings › Repository digest (GitHub token). */
+    onRepoDigestClick: () -> Unit = {},
     // [T-mcp-integration-android] MCP Integrations page, listed directly below
     // Memory. Default no-op for callers that haven't wired the route yet.
     onMcpClick: () -> Unit = {},
@@ -209,6 +212,15 @@ fun SettingsScreen(
                     title = stringResource(R.string.settings_web_search),
                     subtitle = stringResource(R.string.settings_web_search_subtitle),
                     onClick = onWebSearchClick,
+                )
+                // [T-android-repo-digest] Next to Web search: both configure a
+                // network tool's backend rather than switching it on.
+                SettingsItem(
+                    icon = Icons.Outlined.Code,
+                    iconColor = Color(0xFF34C759),
+                    title = stringResource(R.string.settings_repo_digest),
+                    subtitle = stringResource(R.string.settings_repo_digest_subtitle),
+                    onClick = onRepoDigestClick,
                 )
                 SettingsItem(
                     icon = Icons.Outlined.Groups,

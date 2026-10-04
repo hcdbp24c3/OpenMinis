@@ -37,6 +37,10 @@ enum AgentToolSwitch: String, CaseIterable {
     /// [T-ios-web-fetch] web_fetch. Key string matches Android's
     /// `AgentToolSwitch.WEB_FETCH`.
     case webFetch = "agent.tools.webfetch.enabled"
+    /// [T-ios-repo-digest] repo_digest. Same key string as Android.
+    case repo = "agent.tools.repo.enabled"
+    /// [T-ios-ask-user] ask_user_question. Same key string as Android.
+    case ask = "agent.tools.ask.enabled"
 
     var key: String { rawValue }
 
@@ -67,6 +71,10 @@ enum AgentToolSwitch: String, CaseIterable {
         // [T-ios-web-fetch] ON: it is the cheap path for reading one URL, and it
         // is SSRF-guarded.
         case .webFetch: return true
+        // [T-ios-repo-digest] ON: the cheap alternative to cloning or browsing.
+        case .repo: return true
+        // [T-ios-ask-user] ON: it is what lets the agent ask instead of guess.
+        case .ask: return true
         }
     }
 
@@ -88,6 +96,10 @@ enum AgentToolSwitch: String, CaseIterable {
         case SubAgentDefinition.toolName: return .agents
         case WebSearchTool.name: return .webSearch
         case WebFetchTool.name: return .webFetch
+        case RepoDigestTool.name: return .repo
+        // [T-ios-ask-user] The alias is the MCP's original name, so a transcript
+        // or a model that learned the MCP spelling still resolves.
+        case AskUserQuestion.name, AskUserQuestion.alias: return .ask
         default: return nil
         }
     }
@@ -133,6 +145,8 @@ struct ToolsSettingsView: View {
     @AppStorage(AgentToolSwitch.browser.key) private var browserEnabled: Bool = AgentToolSwitch.browser.defaultValue
     @AppStorage(AgentToolSwitch.webSearch.key) private var webSearchEnabled: Bool = AgentToolSwitch.webSearch.defaultValue
     @AppStorage(AgentToolSwitch.webFetch.key) private var webFetchEnabled: Bool = AgentToolSwitch.webFetch.defaultValue
+    @AppStorage(AgentToolSwitch.repo.key) private var repoEnabled: Bool = AgentToolSwitch.repo.defaultValue
+    @AppStorage(AgentToolSwitch.ask.key) private var askEnabled: Bool = AgentToolSwitch.ask.defaultValue
 
     var body: some View {
         Form {
@@ -160,6 +174,24 @@ struct ToolsSettingsView: View {
                 toolRow(AppLocalized("Web Fetch"), tool: WebFetchTool.name, icon: "arrow.down.doc", isOn: $webFetchEnabled)
             } footer: {
                 Text(AppLocalized("Fetch one URL and read it as text, markdown, raw HTML or pretty JSON — with custom headers, POST bodies, and an optional JavaScript render. Cheaper than driving the browser and safer than curling from the terminal (private and metadata hosts are blocked)."))
+            }
+            // [T-ios-repo-digest] One call reads a whole repository, instead of a
+            // clone or a page-by-page browse.
+            Section {
+                toolRow(AppLocalized("Repository digest"), tool: RepoDigestTool.name, icon: "chevron.left.forwardslash.chevron.right", isOn: $repoEnabled)
+                NavigationLink {
+                    RepoDigestSettingsView()
+                } label: {
+                    Label(AppLocalized("GitHub token"), systemImage: "key")
+                }
+            } footer: {
+                Text(AppLocalized("Read a GitHub repository as a digest — file tree plus the contents that matter — in one call. Binary, vendored, minified and lock files are skipped; include/exclude globs narrow it further."))
+            }
+            // [T-ios-ask-user] The one tool that hands control back to the user.
+            Section {
+                toolRow(AppLocalized("Ask user"), tool: AskUserQuestion.name, icon: "questionmark.circle", isOn: $askEnabled)
+            } footer: {
+                Text(AppLocalized("Let the agent ask you a structured multiple-choice question when a choice is genuinely ambiguous, instead of guessing. The run pauses until you answer or skip."))
             }
             // [T-sub-agents-v1] No Agents section here, and deliberately not
             // even a read-only pointer row: the switch belongs to the Sub Agents

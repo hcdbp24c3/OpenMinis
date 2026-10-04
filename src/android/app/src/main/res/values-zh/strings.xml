@@ -2167,4 +2167,19 @@
     <string name="web_search_url_override_footer">Blank uses the documented endpoint for this provider. Set it to point at a self-hosted gateway or proxy.</string>
     <string name="web_search_bing_local_detail">Bing public HTML results page — no API key. The paid Web Search API is a separate engine in the list.</string>
     <string name="web_search_searxng_auth">Basic 认证（可选）</string>
+
+    <string name="ask_user_title">智能体需要你的选择</string>
+    <string name="ask_user_other">其它 —— 直接输入你的答案</string>
+    <string name="ask_user_submit">提交</string>
+    <string name="ask_user_skip">跳过</string>
+    <string name="agent_tools_ask">询问用户</string>
+    <string name="agent_tools_ask_footer">当选择确实含糊时（偏好哪个方案、往哪个方向走），允许智能体向你提出结构化的选择题，而不是自行猜测。在你回答或跳过之前，任务会暂停。</string>
+
+    <string name="settings_repo_digest">仓库摘要</string>
+    <string name="settings_repo_digest_subtitle">repo_digest 工具使用的 GitHub 令牌</string>
+    <string name="repo_digest_token">GitHub 令牌（可选）</string>
+    <string name="repo_digest_token_placeholder">ghp_… 或 github_pat_…</string>
+    <string name="repo_digest_token_footer">没有令牌也能读取公开仓库：每次摘要只需一次 GitHub API 调用（未认证 60 次/小时），文件内容走的 raw 主机不计入该配额。配置令牌后上限提升到 5000 次/小时，并可读取私有仓库。</string>
+    <string name="agent_tools_repo_digest">仓库摘要</string>
+    <string name="agent_tools_repo_digest_footer">一次调用就把 GitHub 仓库读成摘要 —— 文件树加上关键文件内容，无需克隆或逐页浏览。会自动跳过二进制、依赖目录、压缩产物与 lock 文件；可用 include/exclude glob 进一步收窄。</string>
 </resources>

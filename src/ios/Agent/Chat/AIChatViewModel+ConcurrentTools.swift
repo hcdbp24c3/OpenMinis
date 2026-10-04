@@ -682,6 +682,30 @@ extension AIChatViewModel {
                 await MainActor.run { SkillStore.shared.reload() }
             }
 
+        case "repo_digest":
+            // [T-ios-repo-digest] Not in the schema when off; a request built before
+            // the switch flipped can still name it.
+            guard AgentToolSwitch.isToolEnabled(tu.name) else {
+                toolOutput = Self.toolsDisabledMessage
+                toolSuccess = false
+                break
+            }
+            let digest = await RepoDigestTool.execute(argsJSON: argsJson)
+            toolOutput = digest.output
+            toolSuccess = digest.success
+
+        case AskUserQuestion.name, AskUserQuestion.alias:
+            // [T-ios-ask-user] Blocks the run on the user's answer; the alias is
+            // the MCP's original name.
+            guard AgentToolSwitch.isToolEnabled(tu.name) else {
+                toolOutput = Self.toolsDisabledMessage
+                toolSuccess = false
+                break
+            }
+            let asked = await executeAskUserQuestion(argsJSON: argsJson)
+            toolOutput = asked.output
+            toolSuccess = asked.success
+
         case "web_fetch":
             // [T-ios-web-fetch] Not in the schema when off; a request built before
             // the switch flipped can still name it.

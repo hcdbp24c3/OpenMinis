@@ -416,6 +416,10 @@
 		E5WSR0001 /* WebSearchTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5WSR0011 /* WebSearchTool.swift */; };
 		E5WSS0001 /* WebSearchSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5WSS0011 /* WebSearchSettings.swift */; };
 		E5WFT0001 /* WebFetchTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5WFT0011 /* WebFetchTool.swift */; };
+		E5AQU0001 /* AskUserQuestion.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5AQU0011 /* AskUserQuestion.swift */; };
+		E5RDT0001 /* RepoDigestTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5RDT0011 /* RepoDigestTool.swift */; };
+		E5AQS0001 /* AskUserQuestionsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5AQS0011 /* AskUserQuestionsSheet.swift */; };
+		E5RDS0001 /* RepoDigestSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5RDS0011 /* RepoDigestSettingsView.swift */; };
 		E5WFG0001 /* FetchUrlGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5WFG0011 /* FetchUrlGuard.swift */; };
 		E5WSV0001 /* WebSearchSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5WSV0011 /* WebSearchSettingsView.swift */; };
 		E5TRC001 /* ThinkingRuleCoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5TRC002 /* ThinkingRuleCoding.swift */; };
@@ -1145,6 +1149,10 @@
 		E5WSR0011 /* WebSearchTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchTool.swift; sourceTree = "<group>"; };
 		E5WSS0011 /* WebSearchSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchSettings.swift; sourceTree = "<group>"; };
 		E5WFT0011 /* WebFetchTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebFetchTool.swift; sourceTree = "<group>"; };
+		E5AQU0011 /* AskUserQuestion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestion.swift; sourceTree = "<group>"; };
+		E5RDT0011 /* RepoDigestTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoDigestTool.swift; sourceTree = "<group>"; };
+		E5AQS0011 /* AskUserQuestionsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionsSheet.swift; sourceTree = "<group>"; };
+		E5RDS0011 /* RepoDigestSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoDigestSettingsView.swift; sourceTree = "<group>"; };
 		E5WFG0011 /* FetchUrlGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FetchUrlGuard.swift; sourceTree = "<group>"; };
 		E5WSV0011 /* WebSearchSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchSettingsView.swift; sourceTree = "<group>"; };
 		E5TRC002 /* ThinkingRuleCoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ThinkingRuleCoding.swift; path = Thinking/ThinkingRuleCoding.swift; sourceTree = "<group>"; };
@@ -1664,6 +1672,8 @@
 				E5WSR0011 /* WebSearchTool.swift */,
 				E5WSS0011 /* WebSearchSettings.swift */,
 				E5WFT0011 /* WebFetchTool.swift */,
+				E5AQU0011 /* AskUserQuestion.swift */,
+				E5RDT0011 /* RepoDigestTool.swift */,
 				E5WFG0011 /* FetchUrlGuard.swift */,
 			);
 			path = Agent;
@@ -2121,6 +2131,7 @@
 			isa = PBXGroup;
 			children = (
 				E53000011 /* AIChatViewModel.swift */,
+				E5AQS0011 /* AskUserQuestionsSheet.swift */,
 				E5VMA0011 /* AIChatViewModel+Attachments.swift */,
 				E5VMA0012 /* AIChatViewModel+SlashCommands.swift */,
 				E5VMA0013 /* AIChatViewModel+MentionMenu.swift */,
@@ -2359,6 +2370,7 @@
 				E5SCH0014 /* HelperSettingsView.swift */,
 				E5TLS0011 /* ToolsSettingsView.swift */,
 				E5WSV0011 /* WebSearchSettingsView.swift */,
+				E5RDS0011 /* RepoDigestSettingsView.swift */,
 				E5LOCK102 /* FaceIDProtectionSettingsView.swift */,
 				E5LOCK103 /* AppLockOverlay.swift */,
 			);
@@ -2896,6 +2908,10 @@
 				E5WSR0001 /* WebSearchTool.swift in Sources */,
 				E5WSS0001 /* WebSearchSettings.swift in Sources */,
 				E5WFT0001 /* WebFetchTool.swift in Sources */,
+				E5AQU0001 /* AskUserQuestion.swift in Sources */,
+				E5RDT0001 /* RepoDigestTool.swift in Sources */,
+				E5AQS0001 /* AskUserQuestionsSheet.swift in Sources */,
+				E5RDS0001 /* RepoDigestSettingsView.swift in Sources */,
 				E5WFG0001 /* FetchUrlGuard.swift in Sources */,
 				E5WSV0001 /* WebSearchSettingsView.swift in Sources */,
 				E5VMB0002 /* AIChatViewModel+Fallback.swift in Sources */,

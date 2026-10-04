@@ -1948,6 +1948,22 @@ class ChatViewModel(
      * The cost is negligible — [AgentTools.makeAgentTools] just builds a
      * fixed list of definition objects, no I/O.
      */
+    /**
+     * [T-android-ask-user] The question the agent is currently blocked on, or null.
+     *
+     * Exposed for the chat screen, which shows it as a modal sheet: a model that
+     * asked a question is really stopped (see [executeAskUserQuestion]), and a
+     * card in the transcript would not say so.
+     */
+    private val _pendingUserQuestions =
+        MutableStateFlow<List<com.openminis.app.tools.AskUserQuestion.Question>?>(null)
+    val pendingUserQuestions: StateFlow<List<com.openminis.app.tools.AskUserQuestion.Question>?> =
+        _pendingUserQuestions.asStateFlow()
+
+    /** Completed by the answer sheet, or by skip/cancel. */
+    @Volatile
+    private var askUserDeferred: kotlinx.coroutines.CompletableDeferred<String>? = null
+
     private val agentTools: List<AgentToolDefinition>
         get() = AgentTools.makeAgentTools(
             // [T-android-vision-group / GH#182] The main model's own vision
@@ -1970,6 +1986,8 @@ class ChatViewModel(
             webSearchEnabled = com.openminis.app.tools.AgentToolSwitch.WEB_SEARCH.isEnabled(context),
             // [T-android-web-fetch] Same switch the dispatcher checks below.
             webFetchEnabled = com.openminis.app.tools.AgentToolSwitch.WEB_FETCH.isEnabled(context),
+            askEnabled = com.openminis.app.tools.AgentToolSwitch.ASK.isEnabled(context),
+            repoDigestEnabled = com.openminis.app.tools.AgentToolSwitch.REPO.isEnabled(context),
             // [T-sub-agents-v1] Rebuilt on every schema build (this property is
             // not cached), so renaming a sub agent takes effect on the next
             // request and the enum can never advertise a name the resolver
@@ -13181,6 +13199,24 @@ class ChatViewModel(
             // POST bodies, and an optional real-browser render for client-rendered
             // pages. Previously the model had to curl this through the shell or open
             // it in browser_use and copy the text.
+            // [T-android-repo-digest] One tree call + raw fetches, instead of the
+            // model cloning the repo or driving the browser through it.
+            "repo_digest" ->
+                if (com.openminis.app.tools.AgentToolSwitch.REPO.isEnabled(context)) {
+                    com.openminis.app.tools.RepoDigestTool.execute(argsJson, context)
+                } else {
+                    toolDisabledResult("repo_digest")
+                }
+            // [T-android-ask-user] Blocks the loop on the user's answer; the
+            // dispatcher checks the switch so a replayed call cannot open the
+            // sheet for a tool the user turned off.
+            com.openminis.app.tools.AskUserQuestion.NAME,
+            com.openminis.app.tools.AskUserQuestion.ALIAS ->
+                if (com.openminis.app.tools.AgentToolSwitch.ASK.isEnabled(context)) {
+                    executeAskUserQuestion(argsJson)
+                } else {
+                    toolDisabledResult("ask_user_question")
+                }
             "web_fetch" ->
                 if (com.openminis.app.tools.AgentToolSwitch.WEB_FETCH.isEnabled(context)) {
                     com.openminis.app.tools.WebFetchTool.execute(
@@ -14473,6 +14509,62 @@ class ChatViewModel(
                 "[web_fetch] render failed for $url: ${e.message}",
             )
             null
+        }
+    }
+
+    /**
+     * [T-android-ask-user] The user answered: complete the parked tool call with
+     * the JSON the model expects.
+     */
+    fun submitUserQuestionAnswers(selections: List<List<String>>) {
+        val questions = _pendingUserQuestions.value ?: return
+        val json = com.openminis.app.tools.AskUserQuestion.formatAnswers(questions, selections)
+        val deferred = askUserDeferred
+        askUserDeferred = null
+        _pendingUserQuestions.value = null
+        deferred?.complete(json)
+    }
+
+    /** The user dismissed the sheet: unblock the run and say so, never invent an answer. */
+    fun skipUserQuestions() {
+        dismissPendingUserQuestions("skipped")
+    }
+
+    private fun dismissPendingUserQuestions(reason: String) {
+        val deferred = askUserDeferred
+        askUserDeferred = null
+        _pendingUserQuestions.value = null
+        deferred?.complete("""{"answers":[],"status":"$reason"}""")
+    }
+
+    /**
+     * [T-android-ask-user] Parks the agent loop until the sheet is answered.
+     *
+     * The `finally` is what keeps a cancelled run (user pressed stop, session torn
+     * down) from leaving a pending question on screen or a deferred that a later
+     * `submitUserQuestionAnswers` would complete into nothing.
+     */
+    internal suspend fun executeAskUserQuestion(argsJson: String): ToolExecutionResult {
+        val params = try { JSONObject(argsJson) } catch (_: Exception) {
+            return ToolExecutionResult("ask_user_question: invalid JSON", false)
+        }
+        val questions = com.openminis.app.tools.AskUserQuestion.parse(params)
+        if (questions.isEmpty()) {
+            return ToolExecutionResult(
+                "ask_user_question: no valid questions (need a question with at least 2 options)",
+                false,
+            )
+        }
+        val deferred = kotlinx.coroutines.CompletableDeferred<String>()
+        askUserDeferred = deferred
+        _pendingUserQuestions.value = questions
+        return try {
+            ToolExecutionResult(deferred.await(), true)
+        } finally {
+            if (askUserDeferred === deferred) {
+                askUserDeferred = null
+                _pendingUserQuestions.value = null
+            }
         }
     }
 
