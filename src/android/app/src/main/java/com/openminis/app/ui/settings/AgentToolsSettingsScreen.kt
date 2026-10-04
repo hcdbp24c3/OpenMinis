@@ -29,6 +29,11 @@ fun AgentToolsSettingsScreen(onBack: () -> Unit) {
     var browserEnabled by remember {
         mutableStateOf(AgentToolSwitch.BROWSER.isEnabled(context))
     }
+    // [T-android-web-search] web_search — off/on here gates the tool SCHEMA and
+    // the dispatcher alike; its engine and API keys live on Settings › Web search.
+    var webSearchEnabled by remember {
+        mutableStateOf(AgentToolSwitch.WEB_SEARCH.isEnabled(context))
+    }
 
     SettingsScaffold(title = stringResource(R.string.settings_agent_tools), onBack = onBack) {
         SettingsSection(footer = stringResource(R.string.agent_tools_browser_footer)) {
@@ -38,6 +43,18 @@ fun AgentToolsSettingsScreen(onBack: () -> Unit) {
                 onCheckedChange = {
                     browserEnabled = it
                     AgentToolSwitch.BROWSER.setEnabled(context, it)
+                },
+                showDivider = true,
+            )
+            // [T-android-web-search] Same section, because the choice is the same
+            // kind of choice: may the agent reach the network on its own. The
+            // difference is cost — one request instead of driving a WebView.
+            SettingsSwitchRow(
+                title = stringResource(R.string.agent_tools_web_search),
+                checked = webSearchEnabled,
+                onCheckedChange = {
+                    webSearchEnabled = it
+                    AgentToolSwitch.WEB_SEARCH.setEnabled(context, it)
                 },
                 showDivider = false,
             )

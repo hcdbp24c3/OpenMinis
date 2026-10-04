@@ -39,6 +39,7 @@ import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Handyman
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.automirrored.outlined.Send
@@ -87,6 +88,8 @@ fun SettingsScreen(
     /** [T-p2-agent-settings] Settings › Agents (delegation on/off), below Memory. */
     onAgentsClick: () -> Unit = {},
     onAgentToolsClick: () -> Unit = {},
+    /** [T-android-web-search] Settings › Web search (engine + API keys). */
+    onWebSearchClick: () -> Unit = {},
     // [T-mcp-integration-android] MCP Integrations page, listed directly below
     // Memory. Default no-op for callers that haven't wired the route yet.
     onMcpClick: () -> Unit = {},
@@ -196,6 +199,16 @@ fun SettingsScreen(
                     title = stringResource(R.string.settings_agent_tools),
                     subtitle = stringResource(R.string.settings_agent_tools_subtitle),
                     onClick = onAgentToolsClick,
+                )
+                // [T-android-web-search] Right below Agent Tools: both are about
+                // what the agent may call, and this one configures the tool's
+                // backend rather than switching it on.
+                SettingsItem(
+                    icon = Icons.Outlined.Public,
+                    iconColor = Color(0xFF32ADE6),
+                    title = stringResource(R.string.settings_web_search),
+                    subtitle = stringResource(R.string.settings_web_search_subtitle),
+                    onClick = onWebSearchClick,
                 )
                 SettingsItem(
                     icon = Icons.Outlined.Groups,

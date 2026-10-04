@@ -1966,6 +1966,8 @@ class ChatViewModel(
             isHelper = isHelper,
             delegateEnabled = com.openminis.app.tools.AgentToolSwitch.AGENTS.isEnabled(context),
             browserEnabled = com.openminis.app.tools.AgentToolSwitch.BROWSER.isEnabled(context),
+            // [T-android-web-search] Same switch the dispatcher checks below.
+            webSearchEnabled = com.openminis.app.tools.AgentToolSwitch.WEB_SEARCH.isEnabled(context),
             // [T-sub-agents-v1] Rebuilt on every schema build (this property is
             // not cached), so renaming a sub agent takes effect on the next
             // request and the enum can never advertise a name the resolver
@@ -13162,6 +13164,16 @@ class ChatViewModel(
                     executeBrowserUseTool(argsJson)
                 } else {
                     toolDisabledResult("browser_use")
+                }
+            // [T-android-web-search] Titles, URLs and snippets in one request.
+            // The switch is checked HERE too, not only in the schema builder:
+            // a replayed turn (or a stale schema on a retried request) can still
+            // emit the call, and executing it would ignore the user's setting.
+            "web_search" ->
+                if (com.openminis.app.tools.AgentToolSwitch.WEB_SEARCH.isEnabled(context)) {
+                    com.openminis.app.tools.WebSearchTool.execute(argsJson, context)
+                } else {
+                    toolDisabledResult("web_search")
                 }
             "memory_write" -> executeMemoryWriteTool(argsJson)
             // [T-sub-agents-v1] One tool, five actions. The legacy names are

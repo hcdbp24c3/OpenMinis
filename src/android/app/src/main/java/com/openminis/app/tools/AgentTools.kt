@@ -39,6 +39,11 @@ object AgentTools {
         // browser_use globally. Separate from delegateEnabled because the two
         // are independent user choices; mirrors iOS AgentToolSwitch.browser.
         browserEnabled: Boolean = true,
+        // [T-android-web-search] Settings › Agent Tools › Web search. Gated at
+        // the read like every other optional capability (see AgentToolSwitch):
+        // the dispatcher checks the same switch, so a replayed call cannot
+        // execute a tool the user turned off.
+        webSearchEnabled: Boolean = true,
         // [T-sub-agents-v1] The names of the enabled sub agents, in roster
         // order. These become `subagent_task.agent`'s enum, and the caller
         // rebuilds them every turn: the schema is not cached, so a rename takes
@@ -55,6 +60,10 @@ object AgentTools {
             add(ReadImageTool.definition())
         }
         if (browserEnabled) add(browserUseDefinition())
+        // [T-android-web-search] One HTTP request instead of driving a real
+        // browser for a fact; the description tells the model to prefer this and
+        // to reach for browser_use only when it must interact with a page.
+        if (webSearchEnabled) add(WebSearchTool.definition())
         if (memoryEnabled) {
             if (!isHelper) add(memoryWriteDefinition())
             add(memoryGetDefinition())

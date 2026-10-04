@@ -24,6 +24,11 @@ enum class AgentToolSwitch(val key: String, val defaultValue: Boolean) {
      *  (see [migrateLegacyIfNeeded]); flipping the default would silently
      *  disable a feature existing users have. */
     AGENTS("agent.tools.agents.enabled", true),
+
+    /** [T-android-web-search] web_search — on by default, because its default
+     *  backend (DuckDuckGo) needs no key and the alternative for a fact is the
+     *  browser tool, which is minutes of page-loading instead of one request. */
+    WEB_SEARCH("agent.tools.websearch.enabled", true),
     ;
 
     fun isEnabled(context: Context): Boolean =
@@ -42,6 +47,7 @@ enum class AgentToolSwitch(val key: String, val defaultValue: Boolean) {
         /** The switch governing a tool name; null = always available. */
         fun governing(toolName: String): AgentToolSwitch? = when (toolName) {
             "browser_use" -> BROWSER
+            "web_search" -> WEB_SEARCH
             // [T-sub-agents-v1] The renamed tool plus the two names
             // shipped builds wrote, so the switch still governs a
             // replayed call from an older transcript.

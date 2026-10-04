@@ -1973,6 +1973,8 @@
     <string name="settings_agent_tools_subtitle">Koje neobavezne alate agent smije koristiti</string>
     <string name="agent_tools_browser">Korištenje preglednika</string>
     <string name="agent_tools_browser_footer">Pregledavanje weba u ugrađenom pregledniku: otvaranje stranica, čitanje, klikanje i upisivanje. Stabilno i uključeno po zadanom. Kad je isključeno, alat se uklanja iz svakog razgovora — model ga uopće ne vidi.</string>
+    <string name="agent_tools_web_search">Web search</string>
+    <string name="agent_tools_web_search_footer">web_search returns titles, URLs and snippets in one request — usually far faster than opening a page with the browser tool. Tap Settings › Web search to pick an engine or add an API key.</string>
     <string name="agent_tools_agents">Agenti</string>
     <string name="agent_tools_agents_footer">Predajte zaokružene podzadatke podagentima koji rade u vlastitim skrivenim sesijama i javljaju rezultat. Isti alat asistentu omogućuje i provjeru ili zaustavljanje pokrenutog. Popis postavite u Postavke › Agenti › Podagenti.</string>
     <string name="settings_agents">Podagenti</string>
@@ -2080,4 +2082,44 @@
     <string name="helper_resume_failed">Nije moguće nastaviti ovog podagenta</string>
     <string name="voice_mic_in_use">Mikrofon koristi druga aplikacija (npr. poziv ili snimanje). Pokušajte ponovno kada završi.</string>
     <string name="voice_mic_unavailable">Mikrofon nije moguće koristiti. Pokušajte ponovno.</string>
+
+    <!-- [T-android-web-search] Web search: engine selection and credentials for
+         the web_search agent tool. Ported from tall-1997/OpenMinis-Linux (GPL-3). -->
+<string name="settings_web_search">Web search</string>
+<string name="settings_web_search_subtitle">Tavily, Bocha, Exa, Brave, Jina, Zhipu, Bing, SearXNG, or custom</string>
+<string name="web_search_engine_header">Engine</string>
+<string name="web_search_engine_footer">Tap an engine to configure it. DuckDuckGo needs no key. SearXNG needs an instance URL. Bing needs an API key. Custom uses a URL template with {query}. Failed searches fall back to DuckDuckGo, then suggest browser_use.</string>
+<string name="web_search_engine_ddg">DuckDuckGo HTML</string>
+<string name="web_search_engine_searxng">SearXNG</string>
+<string name="web_search_engine_bing">Bing Web Search API</string>
+<string name="web_search_engine_tavily">Tavily</string>
+<string name="web_search_engine_bocha">Bocha</string>
+<string name="web_search_engine_exa">Exa</string>
+<string name="web_search_engine_brave">Brave Search</string>
+<string name="web_search_engine_jina">Jina Search</string>
+<string name="web_search_engine_zhipu">Zhipu Web Search</string>
+<string name="web_search_engine_custom">Custom</string>
+<string name="web_search_configured">Configured</string>
+<string name="web_search_api_key">API key</string>
+<string name="web_search_api_key_placeholder">Paste the provider API key</string>
+<string name="web_search_keyed_detail">%1$s is a first-class backend. Paste its API key, then turn on “Use this engine”. DuckDuckGo stays the no-key fallback when fallback is enabled.</string>
+<string name="web_search_use_engine">Use this engine</string>
+<string name="web_search_in_use">In use</string>
+<string name="web_search_no_key_needed">No API key needed</string>
+<string name="web_search_not_configured">Not configured</string>
+<string name="web_search_key_saved">API key saved</string>
+<string name="web_search_ddg_detail">HTML search with no credentials. Default engine.</string>
+<string name="web_search_searxng_detail">Public or self-hosted SearXNG instance. Paste the search endpoint or site origin.</string>
+<string name="web_search_bing_detail">Microsoft Bing Web Search v7 subscription key.</string>
+<string name="web_search_custom_url">Search URL</string>
+<string name="web_search_custom_key">API key (optional)</string>
+<string name="web_search_custom_key_placeholder">Leave blank if unused</string>
+<string name="web_search_custom_key_header">API key header (optional)</string>
+<string name="web_search_custom_detail">Use {query} (and optional {key}) in the URL. JSON arrays named results/items/data are parsed; HTML falls back to DuckDuckGo-style cards. If the header is Authorization, the key is sent as Bearer.</string>
+<string name="web_search_credentials_header">Endpoints</string>
+<string name="web_search_searxng_url">SearXNG URL</string>
+<string name="web_search_bing_key">Bing subscription key</string>
+<string name="web_search_fallback">Fallback to DuckDuckGo</string>
+<string name="web_search_fallback_sub">If the selected engine fails, retry DuckDuckGo</string>
+<string name="web_search_fallback_footer">Empty results still recommend browser_use on a known URL.</string>
 </resources>

@@ -1915,6 +1915,8 @@
     <string name="settings_agent_tools_subtitle">允许助手使用哪些可选工具</string>
     <string name="agent_tools_browser">浏览器</string>
     <string name="agent_tools_browser_footer">在应用内浏览器中访问网页：打开页面、阅读内容、点击和输入。功能已稳定，默认开启。关闭后该工具会从所有对话中移除，模型完全看不到它。</string>
+    <string name="agent_tools_web_search">Web search</string>
+    <string name="agent_tools_web_search_footer">web_search returns titles, URLs and snippets in one request — usually far faster than opening a page with the browser tool. Tap Settings › Web search to pick an engine or add an API key.</string>
     <string name="agent_tools_agents">代理任务</string>
     <string name="agent_tools_agents_footer">把独立的子任务交给子代理，在其各自的隐藏会话中完成并回报结果。同一个工具也让助手查看或停止已经派出的子代理。名册在“设置 › 代理任务 › 子代理”中配置。</string>
     <string name="settings_agents">子代理任务</string>
@@ -2115,4 +2117,44 @@
     <string name="rootfs_dns_saved">已保存并生效</string>
     <string name="rootfs_dns_effective_system">当前生效：系统 DNS</string>
     <string name="rootfs_dns_effective_custom">当前生效：%1$s</string>
+
+    <!-- [T-android-web-search] Web search: engine selection and credentials for
+         the web_search agent tool. Ported from tall-1997/OpenMinis-Linux (GPL-3). -->
+<string name="settings_web_search">网络搜索</string>
+<string name="settings_web_search_subtitle">Tavily、博查、Exa、Brave、Jina、智谱、Bing、SearXNG 或自定义</string>
+<string name="web_search_engine_header">搜索引擎</string>
+<string name="web_search_engine_footer">点进引擎即可配置。DuckDuckGo 无需密钥。SearXNG 需要实例 URL。Bing 需要 API 密钥。自定义使用带 {query} 的地址模板。失败时回退 DuckDuckGo，再建议用 browser_use 打开具体网址。</string>
+<string name="web_search_engine_ddg">DuckDuckGo HTML</string>
+<string name="web_search_engine_searxng">SearXNG</string>
+<string name="web_search_engine_bing">Bing 网页搜索 API</string>
+<string name="web_search_engine_tavily">Tavily</string>
+<string name="web_search_engine_bocha">博查</string>
+<string name="web_search_engine_exa">Exa</string>
+<string name="web_search_engine_brave">Brave Search</string>
+<string name="web_search_engine_jina">Jina Search</string>
+<string name="web_search_engine_zhipu">智谱网页搜索</string>
+<string name="web_search_engine_custom">自定义</string>
+<string name="web_search_configured">已配置</string>
+<string name="web_search_api_key">API 密钥</string>
+<string name="web_search_api_key_placeholder">粘贴该服务的 API 密钥</string>
+<string name="web_search_keyed_detail">%1$s 是一等搜索后端。粘贴密钥后打开「使用此引擎」。开启回退时，失败仍会改走无需密钥的 DuckDuckGo。</string>
+<string name="web_search_use_engine">使用此引擎</string>
+<string name="web_search_in_use">当前使用</string>
+<string name="web_search_no_key_needed">无需 API 密钥</string>
+<string name="web_search_not_configured">尚未配置</string>
+<string name="web_search_key_saved">已保存密钥</string>
+<string name="web_search_ddg_detail">无需凭证的 HTML 搜索，默认引擎。</string>
+<string name="web_search_searxng_detail">公共或自建 SearXNG 实例。填写搜索接口或站点根地址。</string>
+<string name="web_search_bing_detail">Microsoft Bing Web Search v7 订阅密钥。</string>
+<string name="web_search_custom_url">搜索地址</string>
+<string name="web_search_custom_key">API 密钥（可选）</string>
+<string name="web_search_custom_key_placeholder">不需要可留空</string>
+<string name="web_search_custom_key_header">密钥请求头（可选）</string>
+<string name="web_search_custom_detail">在地址中使用 {query}（以及可选的 {key}）。会解析 results/items/data 等 JSON 数组；HTML 则按 DuckDuckGo 卡片解析。请求头为 Authorization 时密钥会以 Bearer 发送。</string>
+<string name="web_search_credentials_header">接口</string>
+<string name="web_search_searxng_url">SearXNG 地址</string>
+<string name="web_search_bing_key">Bing 订阅密钥</string>
+<string name="web_search_fallback">失败时回退 DuckDuckGo</string>
+<string name="web_search_fallback_sub">所选引擎失败时再试 DuckDuckGo</string>
+<string name="web_search_fallback_footer">仍然没有结果时会提示用 browser_use 打开已知网址。</string>
 </resources>
