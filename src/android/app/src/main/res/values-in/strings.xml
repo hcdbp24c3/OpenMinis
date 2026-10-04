@@ -407,6 +407,9 @@
     <string name="filebrowser_hide_hidden">Sembunyikan Berkas Tersembunyi</string>
     <string name="filebrowser_sort_by">Urutkan Menurut</string>
     <string name="filepreview_share">Bagikan</string>
+    <!-- [T-android-file-preview-edit] Copy the file's contents to the clipboard. -->
+    <string name="filepreview_copy_content">Salin isi</string>
+    <string name="filepreview_content_copied">Isi disalin</string>
     <string name="action_print">Cetak</string>
     <string name="filepreview_save_to_gallery">Simpan ke galeri</string>
     <string name="filepreview_save_as">Simpan sebagai…</string>

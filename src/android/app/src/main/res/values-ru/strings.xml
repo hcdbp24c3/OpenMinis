@@ -404,6 +404,9 @@
     <string name="filebrowser_hide_hidden">Скрыть скрытые файлы</string>
     <string name="filebrowser_sort_by">Сортировать по</string>
     <string name="filepreview_share">Поделиться</string>
+    <!-- [T-android-file-preview-edit] Copy the file's contents to the clipboard. -->
+    <string name="filepreview_copy_content">Копировать содержимое</string>
+    <string name="filepreview_content_copied">Содержимое скопировано</string>
     <string name="action_print">Печать</string>
     <string name="filepreview_save_to_gallery">Сохранить в галерею</string>
     <string name="filepreview_save_as">Сохранить как…</string>

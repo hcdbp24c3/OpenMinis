@@ -459,6 +459,9 @@
     <string name="filebrowser_hide_hidden">Sakrij skrivene datoteke</string>
     <string name="filebrowser_sort_by">Razvrstaj po</string>
     <string name="filepreview_share">Podijeli</string>
+    <!-- [T-android-file-preview-edit] Copy the file's contents to the clipboard. -->
+    <string name="filepreview_copy_content">Kopiraj sadržaj</string>
+    <string name="filepreview_content_copied">Sadržaj kopiran</string>
     <string name="action_print">Ispiši</string>
     <string name="filepreview_save_to_gallery">Spremi u galeriju</string>
     <string name="filepreview_save_as">Spremi kao…</string>

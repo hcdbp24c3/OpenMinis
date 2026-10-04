@@ -403,6 +403,9 @@
     <string name="filebrowser_hide_hidden">ซ่อนไฟล์ที่ซ่อนอยู่</string>
     <string name="filebrowser_sort_by">เรียงตาม</string>
     <string name="filepreview_share">แชร์</string>
+    <!-- [T-android-file-preview-edit] Copy the file's contents to the clipboard. -->
+    <string name="filepreview_copy_content">คัดลอกเนื้อหา</string>
+    <string name="filepreview_content_copied">คัดลอกเนื้อหาแล้ว</string>
     <string name="action_print">พิมพ์</string>
     <string name="filepreview_save_to_gallery">บันทึกลงแกลเลอรี</string>
     <string name="filepreview_save_as">บันทึกเป็น…</string>

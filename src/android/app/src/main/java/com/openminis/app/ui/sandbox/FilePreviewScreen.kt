@@ -2,6 +2,8 @@ package com.openminis.app.ui.sandbox
 
 import com.openminis.app.R
 import androidx.compose.ui.res.stringResource
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -29,6 +31,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -46,7 +49,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Android
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -55,11 +60,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -109,6 +118,20 @@ fun FilePreviewScreen(
     // the preview. Long paths use TextOverflow.Ellipsis (the TopAppBar
     // title slot is single-line by spec).
     var showFullPath by remember(item.file) { mutableStateOf(false) }
+
+    // [T-android-file-preview-edit] In-place editing of a text file.
+    //
+    // `contentVersion` matters: every renderer below remembers on `item.file`
+    // (a File instance does not change when the bytes do), so a save would
+    // otherwise leave the old text on screen until the screen was reopened.
+    // Bumping this key forces a fresh composition, i.e. a re-read.
+    var contentVersion by remember(item.file) { mutableStateOf(0) }
+    var editingText by remember(item.file) { mutableStateOf<String?>(null) }
+    var isSavingEdit by remember(item.file) { mutableStateOf(false) }
+    // Both new actions read the WHOLE file into memory (clipboard entry, editor
+    // buffer), so they are offered only for files that fit. 2 MB is far above
+    // any hand-edited text file and far below anything that would stall the UI.
+    val canEditContent = item.isTextFile && item.size <= MAX_EDIT_BYTES
 
     // T144: SAF Save-As for non-image files (image keeps T142 MediaStore).
     val mimeType = remember(item.file) {
@@ -204,6 +227,48 @@ fun FilePreviewScreen(
                     }
                 },
                 actions = {
+                    // [T-android-file-preview-edit] Copy the file's contents —
+                    // Share/Print hand the file to another app, which is a
+                    // different errand from "put the text on my clipboard".
+                    if (canEditContent) {
+                        IconButton(onClick = {
+                            scope.launch {
+                                val text = withContext(Dispatchers.IO) {
+                                    runCatching { item.file.readText() }.getOrNull()
+                                }
+                                if (text == null) {
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.file_save_failed_toast),
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                    return@launch
+                                }
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText(item.name, text))
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.filepreview_content_copied),
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                                AppLogger.info("FilePreview", "Copied ${item.name} (${text.length} chars) to clipboard")
+                            }
+                        }) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.filepreview_copy_content))
+                        }
+                        // Edit in place. The sheet writes the file back on Save
+                        // and bumps `contentVersion` so the preview re-reads it.
+                        IconButton(onClick = {
+                            scope.launch {
+                                val text = withContext(Dispatchers.IO) {
+                                    runCatching { item.file.readText() }.getOrNull()
+                                }
+                                if (text != null) editingText = text
+                            }
+                        }) {
+                            Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.common_edit))
+                        }
+                    }
                     // T142: Share works for any file — FileProvider URI +
                     // ACTION_SEND + FLAG_GRANT_READ_URI_PERMISSION. iOS parity.
                     IconButton(onClick = { shareFile(context, item) }) {
@@ -251,7 +316,9 @@ fun FilePreviewScreen(
                 .padding(padding),
         ) {
             // Order matters: markdown / html before generic text — both are
-            // technically text but warrant richer renderers.
+            // technically text but warrant richer renderers. Keyed on
+            // `contentVersion` so an in-place edit re-reads the file.
+            key(contentVersion) {
             when {
                 item.isMarkdownFile -> MarkdownPreview(item)
                 item.isHtmlFile -> HtmlPreview(item)
@@ -270,9 +337,102 @@ fun FilePreviewScreen(
                 item.isTextFile -> TextPreview(item)
                 else -> FileInfoView(item)
             }
+            }
+        }
+    }
+
+    // [T-android-file-preview-edit] Editor sheet. Sits outside the Scaffold so it
+    // owns its own window (and its own insets) like the other sheets here.
+    val textToEdit = editingText
+    if (textToEdit != null) {
+        FileContentEditorSheet(
+            initialText = textToEdit,
+            isSaving = isSavingEdit,
+            onDismiss = { if (!isSavingEdit) editingText = null },
+            onSave = { newText ->
+                isSavingEdit = true
+                scope.launch {
+                    val ok = withContext(Dispatchers.IO) {
+                        runCatching { item.file.writeText(newText) }.isSuccess
+                    }
+                    isSavingEdit = false
+                    if (ok) {
+                        // Close FIRST, then re-read: the sheet is keyed on
+                        // `initialText`, so leaving it open would keep the
+                        // stale buffer in place behind the toast.
+                        editingText = null
+                        contentVersion++
+                        AppLogger.info("FilePreview", "Saved ${item.name} (${newText.length} chars)")
+                    }
+                    Toast.makeText(
+                        context,
+                        context.getString(if (ok) R.string.file_saved_toast else R.string.file_save_failed_toast),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            },
+        )
+    }
+}
+
+/**
+ * [T-android-file-preview-edit] Plain-text editor for one file.
+ *
+ * Deliberately not a syntax-highlighting editor: the preview screen's job is to
+ * let the user fix a line and save, and a TextField carries the whole file
+ * without pulling an editor dependency (or a WebView round-trip) into the
+ * sandbox viewer. Monospace, because every file this is offered for is text.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FileContentEditorSheet(
+    initialText: String,
+    isSaving: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var text by remember(initialText) { mutableStateOf(initialText) }
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .padding(horizontal = 16.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.common_edit),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                enabled = !isSaving,
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onDismiss, enabled = !isSaving) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+                Spacer(Modifier.width(8.dp))
+                TextButton(onClick = { onSave(text) }, enabled = !isSaving) {
+                    Text(stringResource(R.string.common_save))
+                }
+            }
         }
     }
 }
+
+/** [T-android-file-preview-edit] Largest file the paste/edit actions will load. */
+private const val MAX_EDIT_BYTES = 2_000_000L
 
 // ==================== Image Preview ====================
 

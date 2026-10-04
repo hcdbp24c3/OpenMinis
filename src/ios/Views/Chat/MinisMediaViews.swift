@@ -1,3 +1,4 @@
+import UIKit
 import SwiftUI
 import AVKit
 import Photos
@@ -872,6 +873,8 @@ struct MinisTextPreviewView: View {
     @State private var isLoading = true
     @State private var showShareSheet = false
     @State private var showFullPath = false
+    /// [T-ios-file-preview-edit] Non-nil while the editor sheet is up.
+    @State private var editorPayload: FileContentEditorPayload?
 
     var body: some View {
         NavigationView {
@@ -896,6 +899,24 @@ struct MinisTextPreviewView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
+                        // [T-ios-file-preview-edit] These two act on the file's
+                        // CONTENTS: "Copy" puts the whole text on the clipboard, and
+                        // Edit writes it back in place. Edit is gated on the file
+                        // being writable and within the same 2 MB cap the preview
+                        // itself reads, so "editable" cannot drift from "previewable".
+                        Button {
+                            UIPasteboard.general.string = text
+                            MinisToast.show(AppLocalized("Copied"))
+                        } label: {
+                            Label(AppLocalized("Copy"), systemImage: "doc.on.doc")
+                        }
+                        .disabled(text.isEmpty)
+                        Button {
+                            editorPayload = FileContentEditorPayload(text: text)
+                        } label: {
+                            Label(AppLocalized("Edit"), systemImage: "pencil")
+                        }
+                        .disabled(!isEditable)
                         Button {
                             PrintHelper.printText(text, jobName: fileURL.lastPathComponent)
                         } label: {
@@ -917,9 +938,24 @@ struct MinisTextPreviewView: View {
         // Re-read when the file's mtime/size changes, not just on first
         // appearance, so an in-place rewrite shows current bytes.
         // [T-ios-file-preview-stale-cache]
+        .sheet(item: $editorPayload) { payload in
+            // The preview re-reads on the file's mtime/size fingerprint
+            // (filePreviewFingerprint below), so a save refreshes it with no
+            // extra plumbing here.
+            FileContentEditorSheet(fileURL: fileURL, initialText: payload.text)
+        }
         .task(id: filePreviewFingerprint(fileURL)) {
             await loadFileContent()
         }
+    }
+
+    /// [T-ios-file-preview-edit] Whether Edit can do something useful: writable,
+    /// non-empty, and within the editor's size cap.
+    private var isEditable: Bool {
+        guard !text.isEmpty else { return false }
+        guard FileManager.default.isWritableFile(atPath: fileURL.path) else { return false }
+        let size = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        return size <= FileContentEditorPayload.maxBytes
     }
 
     private func loadFileContent() async {

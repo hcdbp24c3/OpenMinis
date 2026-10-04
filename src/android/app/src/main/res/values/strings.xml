@@ -480,6 +480,9 @@
     <string name="filebrowser_hide_hidden">Hide Hidden Files</string>
     <string name="filebrowser_sort_by">Sort By</string>
     <string name="filepreview_share">Share</string>
+    <!-- [T-android-file-preview-edit] Copy the file's contents to the clipboard. -->
+    <string name="filepreview_copy_content">Copy content</string>
+    <string name="filepreview_content_copied">Content copied</string>
     <string name="action_print">Print</string>
     <string name="filepreview_save_to_gallery">Save to gallery</string>
     <string name="filepreview_save_as">Save as…</string>

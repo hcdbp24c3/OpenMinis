@@ -402,6 +402,9 @@
     <string name="filebrowser_hide_hidden">Itago ang Mga Nakatagong File</string>
     <string name="filebrowser_sort_by">Ayusin Ayon sa</string>
     <string name="filepreview_share">Ibahagi</string>
+    <!-- [T-android-file-preview-edit] Copy the file's contents to the clipboard. -->
+    <string name="filepreview_copy_content">Kopyahin ang nilalaman</string>
+    <string name="filepreview_content_copied">Nakopya ang nilalaman</string>
     <string name="action_print">I-print</string>
     <string name="filepreview_save_to_gallery">I-save sa gallery</string>
     <string name="filepreview_save_as">I-save bilang…</string>

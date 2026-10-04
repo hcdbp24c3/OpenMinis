@@ -403,6 +403,9 @@
     <string name="filebrowser_hide_hidden">숨김 파일 감추기</string>
     <string name="filebrowser_sort_by">정렬 기준</string>
     <string name="filepreview_share">공유</string>
+    <!-- [T-android-file-preview-edit] Copy the file's contents to the clipboard. -->
+    <string name="filepreview_copy_content">내용 복사</string>
+    <string name="filepreview_content_copied">내용 복사됨</string>
     <string name="action_print">인쇄</string>
     <string name="filepreview_save_to_gallery">갤러리에 저장</string>
     <string name="filepreview_save_as">다른 이름으로 저장…</string>

@@ -415,22 +415,94 @@ private struct FilePreviewSheet: View {
     let item: FileItem
     @Environment(\.dismiss) private var dismiss
 
+    /// [T-ios-file-preview-edit] Non-nil while the editor sheet is up.
+    @State private var editorPayload: FileContentEditorPayload?
+    /// Bumped after a save so `content` is rebuilt and re-reads the file: each
+    /// preview below loads once into `@State`, so a same-instance update would
+    /// keep showing the bytes we just replaced.
+    @State private var reloadToken = UUID()
+
+    private var resolved: URL {
+        item.isSymlink ? item.url.resolvingSymlinksInPath() : item.url
+    }
+
     var body: some View {
         NavigationStack {
             content
+                .id(reloadToken)
                 .navigationTitle(item.name)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            if canEditContent {
+                                // [T-ios-file-preview-edit] "Copy" here means the
+                                // file's CONTENTS, which is a different errand from
+                                // the browser's "Copy Absolute Path" / "Copy to…".
+                                Button {
+                                    Task { await copyContent() }
+                                } label: {
+                                    Label(AppLocalized("Copy"), systemImage: "doc.on.doc")
+                                }
+                                Button {
+                                    Task {
+                                        if let text = await loadEditableText() {
+                                            editorPayload = FileContentEditorPayload(text: text)
+                                        }
+                                    }
+                                } label: {
+                                    Label(AppLocalized("Edit"), systemImage: "pencil")
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Done") { dismiss() }
                     }
                 }
         }
+        .sheet(item: $editorPayload) { payload in
+            FileContentEditorSheet(fileURL: resolved, initialText: payload.text) {
+                reloadToken = UUID()
+            }
+        }
+    }
+
+    /// [T-ios-file-preview-edit] Offered only where editing is meaningful: a text
+    /// file, within the same 2 MB cap the preview itself reads.
+    private var canEditContent: Bool {
+        guard !item.isDirectory, item.size <= FileContentEditorPayload.maxBytes else { return false }
+        switch richPreviewKind(for: item) {
+        case .text, .markdown, .html: return true
+        default: return false
+        }
+    }
+
+    private func loadEditableText() async -> String? {
+        let url = resolved
+        return await Task.detached(priority: .userInitiated) { () -> String? in
+            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+            let capped = data.prefix(FileContentEditorPayload.maxBytes)
+            return String(data: capped, encoding: .utf8)
+                ?? String(data: capped, encoding: .isoLatin1)
+        }.value
+    }
+
+    private func copyContent() async {
+        guard let text = await loadEditableText() else {
+            MinisToast.show(AppLocalized("Failed"))
+            return
+        }
+        UIPasteboard.general.string = text
+        MinisToast.show(AppLocalized("Copied"))
+        AppLogger(category: "FilePreview").info("[Preview] copied \(item.name) (\(text.count) chars)")
     }
 
     @ViewBuilder
     private var content: some View {
-        let resolved = item.isSymlink ? item.url.resolvingSymlinksInPath() : item.url
+        let resolved = self.resolved
         switch richPreviewKind(for: item) {
         case .markdown:
             MarkdownFilePreview(url: resolved, item: item)
@@ -809,6 +881,85 @@ private struct FileBrowserRow: View {
 }
 
 // MARK: - File Item Row
+
+/// [T-ios-file-preview-edit] Payload for the editor sheet.
+struct FileContentEditorPayload: Identifiable {
+    let id = UUID()
+    let text: String
+
+    /// Same 2 MB ceiling the text previews read, so "editable" and "previewable"
+    /// agree instead of drifting apart.
+    static let maxBytes = 2 * 1024 * 1024
+}
+
+/// [T-ios-file-preview-edit] Plain-text editor for one file's contents.
+///
+/// Deliberately a `TextEditor` over the whole file rather than a
+/// syntax-highlighting editor: the preview screens' job is "fix a line and save",
+/// which does not justify an editor dependency or a WebView round-trip. Monospace
+/// because every file it is offered for is text.
+struct FileContentEditorSheet: View {
+    let fileURL: URL
+    let onSaved: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var text: String
+    @State private var isSaving = false
+
+    init(fileURL: URL, initialText: String, onSaved: @escaping () -> Void = {}) {
+        self.fileURL = fileURL
+        self.onSaved = onSaved
+        _text = State(initialValue: initialText)
+    }
+
+    var body: some View {
+        NavigationStack {
+            TextEditor(text: $text)
+                .font(.system(.footnote, design: .monospaced))
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .disabled(isSaving)
+                .navigationTitle(AppLocalized("Edit"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(AppLocalized("Cancel")) { dismiss() }
+                            .disabled(isSaving)
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(AppLocalized("Save")) { save() }
+                            .disabled(isSaving)
+                    }
+                }
+        }
+    }
+
+    private func save() {
+        isSaving = true
+        let payload = text
+        let url = fileURL
+        Task {
+            let ok = await Task.detached(priority: .userInitiated) { () -> Bool in
+                do {
+                    // Atomic: a half-written file would be worse than no save at
+                    // all, and the previews re-read by mtime/size fingerprint.
+                    try payload.write(to: url, atomically: true, encoding: .utf8)
+                    return true
+                } catch {
+                    AppLogger(category: "FilePreview").warning("[Edit] save failed for \(url.lastPathComponent): \(error.localizedDescription)")
+                    return false
+                }
+            }.value
+            isSaving = false
+            guard ok else {
+                MinisToast.show(AppLocalized("Failed"))
+                return
+            }
+            MinisToast.show(AppLocalized("Saved"))
+            onSaved()
+            dismiss()
+        }
+    }
+}
 
 struct FileItemRow: View {
     let item: FileItem
