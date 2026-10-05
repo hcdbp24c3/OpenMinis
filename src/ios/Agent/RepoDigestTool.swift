@@ -1,58 +1,5 @@
 import Foundation
 
-/// [T-ios-repo-digest] GitHub token for `RepoDigestTool`.
-///
-/// The token lives in settings rather than in the tool call on purpose: the model
-/// should never have to be told a credential (and would then be the one putting it
-/// in a transcript). With a token the API limit rises from 60 to 5000 requests per
-/// hour and private repositories become readable; public repos work without one.
-enum RepoDigestPrefs {
-    /// One field per host family, because the auth schemes genuinely differ:
-    /// GitHub and Bitbucket take a Bearer token, GitLab wants `PRIVATE-TOKEN`,
-    /// Gitea/Forgejo expect `token …`. A single field would either be sent with a
-    /// header some hosts reject or invite pasting a credential into the wrong slot.
-    static let githubKey = "repo_digest_github_token"
-    static let gitlabKey = "repo_digest_gitlab_token"
-    static let giteaKey = "repo_digest_gitea_token"
-    static let bitbucketKey = "repo_digest_bitbucket_token"
-
-    private static func key(for provider: RepoDigestTool.Provider) -> String? {
-        switch provider {
-        case .github: return githubKey
-        case .gitlab: return gitlabKey
-        case .gitea: return giteaKey
-        case .bitbucket: return bitbucketKey
-        // An unrecognised host has to be probed before we know which token applies,
-        // so any configured token (Gitea first: most self-hosted forges are
-        // Gitea/Forgejo) is offered to the probe; the tool re-reads the exact
-        // provider's token once the probe identifies it.
-        case .unknown: return nil
-        }
-    }
-
-    static func token(for provider: RepoDigestTool.Provider) -> String {
-        if let key = key(for: provider) { return read(key) }
-        for candidate in [giteaKey, gitlabKey, bitbucketKey, githubKey] {
-            let value = read(candidate)
-            if !value.isEmpty { return value }
-        }
-        return ""
-    }
-
-    static func setToken(_ value: String, for provider: RepoDigestTool.Provider) {
-        guard let key = key(for: provider) else { return }
-        UserDefaults.standard.set(value.trimmingCharacters(in: .whitespacesAndNewlines), forKey: key)
-    }
-
-    static func hasToken(for provider: RepoDigestTool.Provider) -> Bool {
-        !token(for: provider).isEmpty
-    }
-
-    private static func read(_ key: String) -> String {
-        (UserDefaults.standard.string(forKey: key) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-}
-
 /// [T-ios-repo-digest] Read a GitHub repository the way gitingest does — a file
 /// tree plus the contents of the files that matter — in ONE tool call.
 ///
@@ -177,9 +124,14 @@ enum RepoDigestTool {
         let maxChars = min(max((args["max_chars"] as? Int) ?? defaultMaxChars, 500), hardMaxChars)
         let include = parseGlobs(args["include"] as? String ?? "")
         let exclude = parseGlobs(args["exclude"] as? String ?? "")
-        // The token matching the host the URL names; an unrecognised host gets
-        // whichever token is configured, so the probe can reach a private instance.
-        var token = RepoDigestPrefs.token(for: repo.provider)
+        // Credentials come from the git vault, matched on the HOST the URL names — not
+        // on the forge family — so a company GitLab and gitlab.com carry different
+        // tokens and a fleet of self-hosted forges needs no code change. The header
+        // shape stays provider-driven (see `adapterFor`); the vault only supplies the
+        // secret. Resolved once: identifying the provider does not change the host, so
+        // a probe never needs a second lookup.
+        let host = GitVault.normalizeHost(repo.origin)
+        let token = GitVault.token(host: host)
 
         // Unknown hosts are probed once, here: Gitea's API first (most self-hosted
         // forges are Gitea/Forgejo/Gogs), then GitLab's. Probing per FILE would
@@ -194,8 +146,6 @@ enum RepoDigestTool {
                 success: false
             )
         }
-        // Re-read now that the probe identified the host.
-        token = RepoDigestPrefs.token(for: provider)
         let adapter = adapterFor(provider)
 
         let ref = explicitRef.isEmpty ? (repo.ref ?? "") : explicitRef

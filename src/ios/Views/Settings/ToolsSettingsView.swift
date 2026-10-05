@@ -179,10 +179,18 @@ struct ToolsSettingsView: View {
             // clone or a page-by-page browse.
             Section {
                 toolRow(AppLocalized("Repository digest"), tool: RepoDigestTool.name, icon: "chevron.left.forwardslash.chevron.right", isOn: $repoEnabled)
+                // [T-git-vault] Credentials live in the vault, keyed by host, and are
+                // shared with `git` in the terminal; this page only explains how the
+                // tool authenticates and links there.
                 NavigationLink {
                     RepoDigestSettingsView()
                 } label: {
-                    Label(AppLocalized("GitHub token"), systemImage: "key")
+                    Label(AppLocalized("Credentials"), systemImage: "key")
+                }
+                NavigationLink {
+                    GitVaultView()
+                } label: {
+                    Label(AppLocalized("Git vault"), systemImage: "key.horizontal")
                 }
             } footer: {
                 Text(AppLocalized("Read a GitHub repository as a digest — file tree plus the contents that matter — in one call. Binary, vendored, minified and lock files are skipped; include/exclude globs narrow it further."))

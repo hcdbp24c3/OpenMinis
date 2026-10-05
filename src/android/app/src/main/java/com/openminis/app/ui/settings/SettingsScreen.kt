@@ -42,6 +42,7 @@ import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Handyman
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.Settings
@@ -91,8 +92,10 @@ fun SettingsScreen(
     onAgentToolsClick: () -> Unit = {},
     /** [T-android-web-search] Settings › Web search (engine + API keys). */
     onWebSearchClick: () -> Unit = {},
-    /** [T-android-repo-digest] Settings › Repository digest (GitHub token). */
+    /** [T-android-repo-digest] Settings › Repository digest (how the tool authenticates). */
     onRepoDigestClick: () -> Unit = {},
+    /** [T-git-vault] Settings › Git vault (host-keyed tokens and SSH keys). */
+    onGitVaultClick: () -> Unit = {},
     // [T-mcp-integration-android] MCP Integrations page, listed directly below
     // Memory. Default no-op for callers that haven't wired the route yet.
     onMcpClick: () -> Unit = {},
@@ -221,6 +224,16 @@ fun SettingsScreen(
                     title = stringResource(R.string.settings_repo_digest),
                     subtitle = stringResource(R.string.settings_repo_digest_subtitle),
                     onClick = onRepoDigestClick,
+                )
+                // [T-git-vault] Directly below Repository digest: the vault holds the
+                // credentials that tool (and `git` in the terminal) authenticate with,
+                // so this is where a user looks when a private repo 404s.
+                SettingsItem(
+                    icon = Icons.Outlined.Key,
+                    iconColor = Color(0xFFFF9500),
+                    title = stringResource(R.string.settings_git_vault),
+                    subtitle = stringResource(R.string.settings_git_vault_subtitle),
+                    onClick = onGitVaultClick,
                 )
                 SettingsItem(
                     icon = Icons.Outlined.Groups,

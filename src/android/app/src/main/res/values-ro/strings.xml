@@ -1897,14 +1897,7 @@
 
     <string name="settings_repo_digest">Repository digest</string>
     <string name="settings_repo_digest_subtitle">GitHub token for the repo_digest tool</string>
-    <string name="repo_digest_token">GitHub token (optional)</string>
-    <string name="repo_digest_token_placeholder">ghp_… or github_pat_…</string>
-    <string name="repo_digest_token_footer">Without a token, public repositories still work: one GitHub API call per digest (60/hour, unauthenticated) plus file contents from the raw host, which is not part of that quota. A token raises the limit to 5000/hour and lets the tool read private repositories.</string>
     <string name="agent_tools_repo_digest">Repository digest</string>
     <string name="agent_tools_repo_digest_footer">Read a GitHub repository as a digest — file tree plus the contents that matter — in one call, instead of cloning it or browsing page by page. Binary, vendored, minified and lock files are skipped; include/exclude globs narrow it further.</string>
 
-    <string name="repo_digest_token_gitlab">GitLab token (optional)</string>
-    <string name="repo_digest_token_gitea">Gitea / Forgejo / Codeberg token (optional)</string>
-    <string name="repo_digest_token_bitbucket">Bitbucket app password or access token (optional)</string>
-    <string name="repo_digest_tokens_footer">Tokens are optional: public repositories on every supported host work without one. A GitHub or GitLab token raises the API limit (60 → 5000 requests/hour) and reaches private repositories; each host expects its own header, which is why they are separate fields. The tool reports which host it recognised.</string>
 </resources>

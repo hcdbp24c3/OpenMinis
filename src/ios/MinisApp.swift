@@ -128,6 +128,18 @@ struct MinisApp: App {
         //
         // `install` is idempotent, so the later onAppLaunch() call is a no-op.
         CrashSignalHandler.install()
+
+        // [T-git-vault] Migrate the legacy per-forge repo_digest tokens into the vault
+        // and project the vault into the iSH rootfs, so `git clone` in the terminal is
+        // authenticated from the first command. Detached: the Keychain pass and the
+        // rootfs existence check are IO, and neither is needed to draw the first frame.
+        Task.detached(priority: .utility) {
+            GitVault.importRepoDigestLegacyOnce()
+            let rootfs = RootfsManager.shared
+            if rootfs.isInstalled {
+                _ = GitVaultMaterializer.sync(dataPath: rootfs.dataPath)
+            }
+        }
         // [T-auto-grouping-default-on] Auto-grouping ships ON. `bool(forKey:)`
         // returns false for an unregistered key, so the default has to be
         // registered here rather than expressed at the (multiple) read sites —

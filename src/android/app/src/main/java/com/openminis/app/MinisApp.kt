@@ -615,6 +615,25 @@ class MinisApp : Application(), ImageLoaderFactory {
 
         // Initialize sandbox singletons (does not trigger extraction)
         RootfsManager.getInstance(this)
+
+        // [T-git-vault] Migrate the legacy per-forge repo_digest tokens into the vault
+        // and project the vault into the sandbox, so `git clone` in the terminal is
+        // authenticated from the first command. Off the main thread: the encrypted
+        // store's first read pays the keystore cost, and the rootfs check is disk IO.
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            runCatching {
+                com.openminis.app.data.gitvault.GitVault.importRepoDigestLegacyOnce(this@MinisApp)
+                val manager = RootfsManager.getInstance(this@MinisApp)
+                if (manager.isInstalled) {
+                    com.openminis.app.data.gitvault.GitVaultMaterializer
+                        .sync(this@MinisApp, manager.rootfsDir)
+                }
+            }.onFailure {
+                com.openminis.app.logging.AppLogger.warning(
+                    "MinisApp", "git vault sync failed: ${it.message}"
+                )
+            }
+        }
         ExecutionCoordinator.init(this)
         ExecutionCoordinator.envVarRepository = envVarRepository
 

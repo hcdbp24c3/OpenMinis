@@ -1,6 +1,7 @@
 package com.openminis.app.tools
 
 import android.content.Context
+import com.openminis.app.data.gitvault.GitVault
 import com.openminis.app.data.model.AgentToolDefinition
 import com.openminis.app.data.model.AgentToolParam
 import kotlinx.coroutines.async
@@ -148,9 +149,14 @@ object RepoDigestTool {
         val maxChars = args.optInt("max_chars", DEFAULT_MAX_CHARS).coerceIn(500, HARD_MAX_CHARS)
         val include = parseGlobs(args.optString("include", ""))
         val exclude = parseGlobs(args.optString("exclude", ""))
-        // The token matching the host the URL names; an unrecognised host gets
-        // whichever token is configured, so the probe can reach a private instance.
-        var token = RepoDigestPrefs.token(context, repo.provider)
+        // Credentials come from the git vault, matched on the HOST the URL names —
+        // not on the forge family — so a company GitLab and gitlab.com carry
+        // different tokens and a fleet of self-hosted forges needs no code change.
+        // The header shape stays provider-driven (see [adapterFor]); the vault only
+        // supplies the secret. Resolved once: identifying the provider does not
+        // change the host, so a probe never needs a second lookup.
+        val host = GitVault.normalizeHost(repo.origin)
+        val token = GitVault.tokenFor(context, host)
 
         return try {
             // Unknown hosts are probed once, here: Gitea's API first (most
@@ -167,9 +173,6 @@ object RepoDigestTool {
                     toolTitle = toolTitle,
                 )
             }
-            // Re-read now that the probe identified the host: the sentinel that let
-            // the probe run is not necessarily that provider's own token.
-            token = RepoDigestPrefs.token(context, provider)
             val adapter = adapterFor(provider)
 
             // `HEAD` is the last resort: an unauthenticated host may refuse the repo
