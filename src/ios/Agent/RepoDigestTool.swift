@@ -7,14 +7,50 @@ import Foundation
 /// in a transcript). With a token the API limit rises from 60 to 5000 requests per
 /// hour and private repositories become readable; public repos work without one.
 enum RepoDigestPrefs {
-    static let tokenKey = "repo_digest_github_token"
+    /// One field per host family, because the auth schemes genuinely differ:
+    /// GitHub and Bitbucket take a Bearer token, GitLab wants `PRIVATE-TOKEN`,
+    /// Gitea/Forgejo expect `token …`. A single field would either be sent with a
+    /// header some hosts reject or invite pasting a credential into the wrong slot.
+    static let githubKey = "repo_digest_github_token"
+    static let gitlabKey = "repo_digest_gitlab_token"
+    static let giteaKey = "repo_digest_gitea_token"
+    static let bitbucketKey = "repo_digest_bitbucket_token"
 
-    static var token: String {
-        get { (UserDefaults.standard.string(forKey: tokenKey) ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
-        set { UserDefaults.standard.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: tokenKey) }
+    private static func key(for provider: RepoDigestTool.Provider) -> String? {
+        switch provider {
+        case .github: return githubKey
+        case .gitlab: return gitlabKey
+        case .gitea: return giteaKey
+        case .bitbucket: return bitbucketKey
+        // An unrecognised host has to be probed before we know which token applies,
+        // so any configured token (Gitea first: most self-hosted forges are
+        // Gitea/Forgejo) is offered to the probe; the tool re-reads the exact
+        // provider's token once the probe identifies it.
+        case .unknown: return nil
+        }
     }
 
-    static var hasToken: Bool { !token.isEmpty }
+    static func token(for provider: RepoDigestTool.Provider) -> String {
+        if let key = key(for: provider) { return read(key) }
+        for candidate in [giteaKey, gitlabKey, bitbucketKey, githubKey] {
+            let value = read(candidate)
+            if !value.isEmpty { return value }
+        }
+        return ""
+    }
+
+    static func setToken(_ value: String, for provider: RepoDigestTool.Provider) {
+        guard let key = key(for: provider) else { return }
+        UserDefaults.standard.set(value.trimmingCharacters(in: .whitespacesAndNewlines), forKey: key)
+    }
+
+    static func hasToken(for provider: RepoDigestTool.Provider) -> Bool {
+        !token(for: provider).isEmpty
+    }
+
+    private static func read(_ key: String) -> String {
+        (UserDefaults.standard.string(forKey: key) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }
 
 /// [T-ios-repo-digest] Read a GitHub repository the way gitingest does — a file
@@ -47,11 +83,38 @@ enum RepoDigestTool {
         let success: Bool
     }
 
+    /// Git hosts the tool reads through their own API.
+    enum Provider: String {
+        case github
+        case gitlab
+        case gitea
+        case bitbucket
+        case unknown
+
+        var label: String {
+            switch self {
+            case .github: return "GitHub"
+            case .gitlab: return "GitLab"
+            case .gitea: return "Gitea/Forgejo/Codeberg"
+            case .bitbucket: return "Bitbucket Cloud"
+            case .unknown: return "unknown host"
+            }
+        }
+    }
+
+    /// owner/repo/ref/path lifted out of any of the URL shapes a forge uses, plus
+    /// the origin and provider they were read from.
+    ///
+    /// `origin` is kept so every later request goes back to the host the user
+    /// actually named — which is also why the SSRF guard runs per request rather
+    /// than once on the input URL.
     struct RepoRef: Equatable {
         let owner: String
         let repo: String
         let ref: String?
         let path: String?
+        var origin: String = "https://github.com"
+        var provider: Provider = .github
         var slug: String { "\(owner)/\(repo)" }
     }
 
@@ -64,18 +127,20 @@ enum RepoDigestTool {
     static func definition() -> AgentToolDefinition {
         AgentToolDefinition(
             name: name,
-            description: "Read a GitHub repository as a digest: the file tree plus the contents of the " +
-                "files that matter, in one call — like gitingest. Use this instead of cloning the repo or " +
-                "browsing it page by page. Understands repo, /tree/<branch>/<dir> and /blob/<branch>/<file> " +
-                "URLs; `format=tree` lists files only (cheapest way to find your way around), `format=files` " +
-                "(default) adds contents, `format=file` returns one file. Binary, vendored, minified and " +
-                "lock files are skipped automatically; `include`/`exclude` globs narrow that further. Public " +
-                "repos need no credentials; a token configured in Settings › Repository digest raises the " +
-                "GitHub API rate limit and reaches private repos.",
+            description: "Read a git repository as a digest: the file tree plus the contents of the files " +
+                "that matter, in one call — like gitingest. Use this instead of cloning the repo or browsing it " +
+                "page by page. Works with GitHub, GitLab (including self-hosted), Gitea/Forgejo/Codeberg/Gogs, " +
+                "Bitbucket Cloud, and probes other hosts with both API shapes before giving up. Understands repo, " +
+                "`/tree/<ref>/<dir>`, `/-/tree/<ref>/<dir>`, `/src/branch/<ref>/<dir>` and the matching blob URLs; " +
+                "`format=tree` lists files only (cheapest way to find your way around), `format=files` (default) " +
+                "adds contents, `format=file` returns one file. Binary, vendored, minified and lock files are " +
+                "skipped automatically; `include`/`exclude` globs narrow that further. Public repos need no " +
+                "credentials; tokens configured in Settings › Repository digest raise the API limits and reach " +
+                "private repos.",
             parameters: [
                 "tool_title": AgentToolParam(type: .string, description: "A concise 5-10 word summary (e.g. 'Digest fastapi repo')."),
-                "url": AgentToolParam(type: .string, description: "GitHub repository, directory or file URL (or 'owner/repo')."),
-                "ref": AgentToolParam(type: .string, description: "Branch, tag or commit SHA (default: the repo's default branch, or the one in the URL)."),
+                "url": AgentToolParam(type: .string, description: "Repository, directory or file URL — any supported host — or 'owner/repo' for GitHub."),
+                "ref": AgentToolParam(type: .string, description: "Branch, tag or commit SHA (default: the repo's default branch, or the one in the URL). Required for a branch whose name contains a slash on hosts that put the ref in the path (Bitbucket)."),
                 "path": AgentToolParam(type: .string, description: "Restrict to this directory or file path inside the repo."),
                 "include": AgentToolParam(type: .string, description: "Comma-separated globs that files must match (e.g. '*.kt,src/**')."),
                 "exclude": AgentToolParam(type: .string, description: "Comma-separated globs to skip (e.g. '**/test/**,docs/**')."),
@@ -112,17 +177,34 @@ enum RepoDigestTool {
         let maxChars = min(max((args["max_chars"] as? Int) ?? defaultMaxChars, 500), hardMaxChars)
         let include = parseGlobs(args["include"] as? String ?? "")
         let exclude = parseGlobs(args["exclude"] as? String ?? "")
-        let token = RepoDigestPrefs.token
+        // The token matching the host the URL names; an unrecognised host gets
+        // whichever token is configured, so the probe can reach a private instance.
+        var token = RepoDigestPrefs.token(for: repo.provider)
 
-        let ref = explicitRef.isEmpty
-            ? (repo.ref ?? "")
-            : explicitRef
-        let resolvedRef = ref.isEmpty ? (await defaultBranch(repo, token: token) ?? "HEAD") : ref
+        // Unknown hosts are probed once, here: Gitea's API first (most self-hosted
+        // forges are Gitea/Forgejo/Gogs), then GitLab's. Probing per FILE would
+        // multiply the cost of every fetch, so it is resolved up front.
+        let provider = await resolveProvider(repo, token: token)
+        let target = RepoRef(owner: repo.owner, repo: repo.repo, ref: repo.ref, path: repo.path, origin: repo.origin, provider: provider)
+        guard provider != .unknown else {
+            return Execution(
+                output: "repo_digest: \(target.origin) did not answer either the Gitea or the GitLab API. " +
+                    "If it is a plain git server, clone it with the shell tool (`git clone --depth 1 <url>`), " +
+                    "or fetch a single file with web_fetch.",
+                success: false
+            )
+        }
+        // Re-read now that the probe identified the host.
+        token = RepoDigestPrefs.token(for: provider)
+        let adapter = adapterFor(provider)
+
+        let ref = explicitRef.isEmpty ? (repo.ref ?? "") : explicitRef
+        let resolvedRef = ref.isEmpty ? (await adapter.defaultBranch(target, token: token) ?? "HEAD") : ref
         let wantedPath = pathArg.isEmpty ? (repo.path ?? "") : pathArg
         let wantSingleFile = format == "file" || (args["url"] as? String ?? "").contains("/blob/")
 
         if wantSingleFile, !wantedPath.isEmpty {
-            guard let content = await fetchRaw(repo, ref: resolvedRef, path: wantedPath, token: token),
+            guard let content = await adapter.fetchRaw(target, ref: resolvedRef, path: wantedPath, token: token),
                   let text = String(data: content, encoding: .utf8) else {
                 return Execution(
                     output: "repo_digest: could not read \(wantedPath) at \(resolvedRef) (wrong path or private repo without a token?)",
@@ -130,7 +212,7 @@ enum RepoDigestTool {
                 )
             }
             let output = """
-            Repo: \(repo.slug) @ \(resolvedRef)
+            Repo: \(target.origin)/\(target.slug) @ \(resolvedRef)
             File: \(wantedPath) (\(content.count) bytes)
 
             \(sanitize(text, maxChars: maxChars))
@@ -138,10 +220,10 @@ enum RepoDigestTool {
             return Execution(output: output, success: true)
         }
 
-        guard let entries = await listTree(repo, ref: resolvedRef, token: token) else {
+        guard let entries = await adapter.listTree(target, ref: resolvedRef, token: token) else {
             return Execution(
-                output: "repo_digest: GitHub did not return a tree for \(repo.slug) @ \(resolvedRef) " +
-                    "(rate limit? configure a token in Settings › Repository digest)",
+                output: "repo_digest: \(provider.label) did not return a tree for \(target.slug) @ \(resolvedRef) " +
+                    "(rate limit, wrong ref, or private repo without a token?)",
                 success: false
             )
         }
@@ -169,14 +251,14 @@ enum RepoDigestTool {
                 while inFlight < limit, let entry = iterator.next() {
                     inFlight += 1
                     group.addTask {
-                        (entry.path, await fetchRaw(repo, ref: resolvedRef, path: entry.path, token: token))
+                        (entry.path, await adapter.fetchRaw(target, ref: resolvedRef, path: entry.path, token: token))
                     }
                 }
                 while let result = await group.next() {
                     if let data = result.1 { contents[result.0] = data }
                     if let entry = iterator.next() {
                         group.addTask {
-                            (entry.path, await fetchRaw(repo, ref: resolvedRef, path: entry.path, token: token))
+                            (entry.path, await adapter.fetchRaw(target, ref: resolvedRef, path: entry.path, token: token))
                         }
                     }
                 }
@@ -184,7 +266,7 @@ enum RepoDigestTool {
         }
 
         var lines: [String] = []
-        lines.append("Repo: \(repo.slug) @ \(resolvedRef)" + (wantedPath.isEmpty ? "" : " (path: \(wantedPath))"))
+        lines.append("Repo: \(target.origin)/\(target.slug) @ \(resolvedRef) (\(provider.label))" + (wantedPath.isEmpty ? "" : " (path: \(wantedPath))"))
         lines.append("Files: \(matching.count) matched" + (format == "tree" ? "" : ", \(selected.count) included"))
         if let note = omissionNote(notFetched: notFetched, tooBig: tooBig, maxFiles: maxFiles) { lines.append(note) }
         lines.append("")
@@ -214,48 +296,97 @@ enum RepoDigestTool {
 
     // MARK: - pure helpers
 
-    /// Parse any of the shapes a user actually pastes: bare `owner/repo`, a repo
-    /// URL, a `/tree/<ref>/<dir>` link, a `/blob/<ref>/<file>` link.
+    /// Provider detection from the host, then from the URL's own shape. The shape
+    /// matters for self-hosted instances: `/-/` is GitLab's signature (stock GitLab,
+    /// or GitLab CE on a company domain), `/src/branch/` is Gitea's, and both are far
+    /// more reliable than trying to recognise hostnames.
+    static func detectProvider(host: String, url: String) -> Provider {
+        let h = host.lowercased()
+        if h == "github.com" || h.hasSuffix(".github.com") { return .github }
+        if h == "gitlab.com" || h.hasSuffix(".gitlab.com") || url.contains("/-/") { return .gitlab }
+        if h == "codeberg.org" || h.contains("gitea") || h.contains("forgejo") || h.contains("gogs") { return .gitea }
+        if h == "bitbucket.org" || h.hasSuffix(".bitbucket.org") { return .bitbucket }
+        if url.contains("/src/branch/") || url.contains("/src/tag/") || url.contains("/src/commit/") { return .gitea }
+        return .unknown
+    }
+
+    /// Parse any of the shapes a user actually pastes, for any supported forge:
+    /// bare `owner/repo`, a repo URL, `/tree/<ref>/<dir>` (GitHub),
+    /// `/-/tree/<ref>/<dir>` (GitLab), `/src/branch/<ref>/<dir>` (Gitea),
+    /// `/src/<ref>/<dir>` (Bitbucket), and the matching `/blob/…` forms.
     static func parseRepoURL(_ rawURL: String, knownRefs: Set<String>? = nil) -> RepoRef? {
         var s = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !s.isEmpty else { return nil }
-        for prefix in ["https://", "http://"] where s.hasPrefix(prefix) {
-            s = String(s.dropFirst(prefix.count))
+        var origin = "https://github.com"
+        if s.hasPrefix("http://") || s.hasPrefix("https://") {
+            guard let schemeRange = s.range(of: "://") else { return nil }
+            let afterScheme = s.index(schemeRange.upperBound, offsetBy: 0)
+            let hostEnd = s[afterScheme...].firstIndex(of: "/") ?? s.endIndex
+            origin = String(s[s.startIndex..<hostEnd])
+            s = String(s[hostEnd...]).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        } else if s.hasPrefix("www.") {
+            s = String(s.dropFirst(4))
         }
-        if s.hasPrefix("www.") { s = String(s.dropFirst(4)) }
-        if s.hasPrefix("github.com/") { s = String(s.dropFirst("github.com/".count)) }
+        if !rawURL.contains("://") {
+            if s.hasPrefix("github.com/") {
+                s = String(s.dropFirst("github.com/".count))
+            } else if s.contains("."), let slash = s.firstIndex(of: "/"), s[s.startIndex..<slash].contains(".") {
+                // A bare `gitlab.com/owner/repo` or `codeberg.org/owner/repo`.
+                origin = "https://" + String(s[s.startIndex..<slash])
+                s = String(s[s.index(after: slash)...])
+            }
+        }
         s = s.split(separator: "?").first.map(String.init) ?? s
         s = s.split(separator: "#").first.map(String.init) ?? s
         while s.hasSuffix("/") { s.removeLast() }
         guard !s.isEmpty else { return nil }
+        let host = origin.contains("://") ? String(origin.split(separator: "/").dropFirst(2).first ?? "") : ""
+        let provider = detectProvider(host: host, url: rawURL)
         let parts = s.split(separator: "/").map(String.init).filter { !$0.isEmpty }
         guard parts.count >= 2 else { return nil }
         let owner = parts[0]
         var repo = parts[1]
         if repo.hasSuffix(".git") { repo = String(repo.dropLast(4)) }
         guard !owner.isEmpty, !repo.isEmpty else { return nil }
+
+        // GitLab marks its UI paths with `/-/`; drop it before reading ref/path.
+        var rest = Array(parts.dropFirst(2))
+        if rest.first == "-" { rest = Array(rest.dropFirst()) }
         var ref: String?
         var path: String?
-        if parts.count >= 3, parts[2] == "tree" || parts[2] == "blob" {
-            let rest = Array(parts.dropFirst(3))
-            guard !rest.isEmpty else { return RepoRef(owner: owner, repo: repo, ref: nil, path: nil) }
-            if let knownRefs {
-                let joined = rest.joined(separator: "/")
-                // Longest matching ref wins, so `feature/x` beats `feature`.
-                if let match = knownRefs.filter({ joined.hasPrefix($0) }).max(by: { $0.count < $1.count }) {
-                    ref = match
-                    let tail = String(joined.dropFirst(match.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-                    path = tail.isEmpty ? nil : tail
-                    return RepoRef(owner: owner, repo: repo, ref: ref, path: path)
-                }
-            }
-            ref = rest[0]
-            let tail = rest.dropFirst().joined(separator: "/")
+        if rest.count >= 2, rest[0] == "tree" || rest[0] == "blob" {
+            ref = rest[1]
+            let tail = rest.dropFirst(2).joined(separator: "/")
             path = tail.isEmpty ? nil : tail
-        } else if parts.count > 2 {
-            path = parts.dropFirst(2).joined(separator: "/")
+        } else if rest.count >= 3, rest[0] == "src", ["branch", "tag", "commit"].contains(rest[1]) {
+            // Gitea: /src/branch/<branch>/<path>, /src/tag/<tag>/…, /src/commit/<sha>/…
+            ref = rest[2]
+            let tail = rest.dropFirst(3).joined(separator: "/")
+            path = tail.isEmpty ? nil : tail
+        } else if rest.count >= 2, rest[0] == "src" {
+            // Bitbucket: /src/<ref>/<path> — the ref is the first segment, so a
+            // branch containing a slash has to be passed via `ref=`.
+            ref = rest[1]
+            let tail = rest.dropFirst(2).joined(separator: "/")
+            path = tail.isEmpty ? nil : tail
+        } else {
+            let tail = rest.joined(separator: "/")
+            path = tail.isEmpty ? nil : tail
         }
-        return RepoRef(owner: owner, repo: repo, ref: ref, path: path)
+        // A branch containing slashes is only resolvable against the real ref list.
+        if let current = ref, let knownRefs {
+            let candidate = ([current] + (path?.split(separator: "/").map(String.init) ?? [])).joined(separator: "/")
+            if let match = knownRefs.filter({ candidate.hasPrefix($0) }).max(by: { $0.count < $1.count }) {
+                ref = match
+                let tail = String(candidate.dropFirst(match.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                path = tail.isEmpty ? nil : tail
+            }
+        }
+        return RepoRef(owner: owner, repo: repo, ref: ref, path: path, origin: origin, provider: provider)
+    }
+
+    static func isBlobLike(_ rawURL: String) -> Bool {
+        rawURL.contains("/blob/") || rawURL.contains("/-/blob/")
     }
 
     static func parseGlobs(_ raw: String) -> [String] {
@@ -381,64 +512,67 @@ enum RepoDigestTool {
         return set
     }()
 
-    // MARK: - network
+    // MARK: - providers
 
-    private static func request(_ url: String, token: String, accept: String) -> URLRequest? {
+    /// One adapter per provider: the same three questions (what is the default
+    /// branch, what is in the tree, what is in this file) asked the way that host
+    /// wants them asked.
+    private protocol Adapter {
+        func defaultBranch(_ repo: RepoRef, token: String) async -> String?
+        func listTree(_ repo: RepoRef, ref: String, token: String) async -> [TreeEntry]?
+        func fetchRaw(_ repo: RepoRef, ref: String, path: String, token: String) async -> Data?
+    }
+
+    private static func adapterFor(_ provider: Provider) -> Adapter {
+        switch provider {
+        case .github: return GitHubAdapter()
+        case .gitlab: return GitLabAdapter()
+        case .gitea: return GiteaAdapter()
+        case .bitbucket: return BitbucketAdapter()
+        // Unresolved: use the shape the probe tried first, so the adapter and the
+        // resolution cannot disagree about what the host turned out to be.
+        case .unknown: return GiteaAdapter()
+        }
+    }
+
+    /// Probe an unrecognised host: Gitea shape first, then GitLab.
+    private static func resolveProvider(_ repo: RepoRef, token: String) async -> Provider {
+        guard repo.provider == .unknown else { return repo.provider }
+        if await GiteaAdapter().probe(repo, token: token) { return .gitea }
+        if await GitLabAdapter().probe(repo, token: token) { return .gitlab }
+        return .unknown
+    }
+
+    // MARK: - HTTP
+
+    private static func request(
+        _ url: String,
+        token: String,
+        accept: String,
+        authHeader: String = "Authorization",
+        authPrefix: String = "Bearer"
+    ) -> URLRequest? {
         guard let parsed = URL(string: url) else { return nil }
         var request = URLRequest(url: parsed)
         request.timeoutInterval = 45
         request.setValue("OpenMinis/repo_digest", forHTTPHeaderField: "User-Agent")
         request.setValue(accept, forHTTPHeaderField: "Accept")
-        if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        if !token.isEmpty {
+            request.setValue(authPrefix.isEmpty ? token : "\(authPrefix) \(token)", forHTTPHeaderField: authHeader)
+        }
         return request
     }
 
-    private static func defaultBranch(_ repo: RepoRef, token: String) async -> String? {
-        guard let body = await get("\(apiRoot)/repos/\(repo.slug)", token: token, accept: "application/vnd.github+json"),
-              let data = body.data(using: .utf8),
-              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
-        let branch = (root["default_branch"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return branch.isEmpty ? nil : branch
-    }
-
-    private static func listTree(_ repo: RepoRef, ref: String, token: String) async -> [TreeEntry]? {
-        let url = "\(apiRoot)/repos/\(repo.slug)/git/trees/\(encodePath(ref))?recursive=1"
-        guard let body = await get(url, token: token, accept: "application/vnd.github+json"),
-              let data = body.data(using: .utf8),
-              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let array = root["tree"] as? [[String: Any]] else { return nil }
-        return array.compactMap { item in
-            let path = item["path"] as? String ?? ""
-            guard !path.isEmpty else { return nil }
-            return TreeEntry(
-                path: path,
-                type: item["type"] as? String ?? "",
-                size: item["size"] as? Int ?? 0
-            )
-        }
-    }
-
-    private static func fetchRaw(_ repo: RepoRef, ref: String, path: String, token: String) async -> Data? {
-        let url = "\(rawRoot)/\(repo.owner)/\(repo.repo)/\(encodePath(ref))/\(encodePath(path))"
-        // The raw host is allowlisted, but the guard still runs: a redirect could
-        // point anywhere, and the check is free.
-        if let blocked = FetchUrlGuard.blockedReason(url) {
-            _ = blocked
-            return nil
-        }
-        guard let request = request(url, token: token, accept: "text/plain") else { return nil }
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return nil }
-            return data.count > maxFileBytes ? data.prefix(maxFileBytes) : data
-        } catch {
-            return nil
-        }
-    }
-
-    private static func get(_ url: String, token: String, accept: String) async -> String? {
+    /// Hosts are arbitrary now, so the guard runs on every URL the tool builds.
+    private static func get(
+        _ url: String,
+        token: String,
+        accept: String,
+        authHeader: String = "Authorization",
+        authPrefix: String = "Bearer"
+    ) async -> String? {
         if FetchUrlGuard.blockedReason(url) != nil { return nil }
-        guard let request = request(url, token: token, accept: accept) else { return nil }
+        guard let request = request(url, token: token, accept: accept, authHeader: authHeader, authPrefix: authPrefix) else { return nil }
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return nil }
@@ -446,5 +580,212 @@ enum RepoDigestTool {
         } catch {
             return nil
         }
+    }
+
+    private static func bytes(
+        _ url: String,
+        token: String,
+        accept: String,
+        authHeader: String = "Authorization",
+        authPrefix: String = "Bearer"
+    ) async -> Data? {
+        if FetchUrlGuard.blockedReason(url) != nil { return nil }
+        guard let request = request(url, token: token, accept: accept, authHeader: authHeader, authPrefix: authPrefix) else { return nil }
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return nil }
+            return data.count > RepoDigestTool.maxFileBytes ? data.prefix(RepoDigestTool.maxFileBytes) : data
+        } catch {
+            return nil
+        }
+    }
+
+    private static func treeFromJSON(_ body: String) -> [TreeEntry]? {
+        guard let data = body.data(using: .utf8),
+              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let array = root["tree"] as? [[String: Any]] else { return nil }
+        return array.compactMap { item in
+            let path = item["path"] as? String ?? ""
+            guard !path.isEmpty else { return nil }
+            return TreeEntry(path: path, type: item["type"] as? String ?? "", size: item["size"] as? Int ?? 0)
+        }
+    }
+
+    /// GitHub: the shape this tool started as.
+    private struct GitHubAdapter: Adapter {
+        func defaultBranch(_ repo: RepoRef, token: String) async -> String? {
+            guard let body = await RepoDigestTool.get("\(RepoDigestTool.apiRoot)/repos/\(repo.slug)", token: token, accept: "application/vnd.github+json"),
+                  let data = body.data(using: .utf8),
+                  let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+            let branch = (root["default_branch"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return branch.isEmpty ? nil : branch
+        }
+
+        func listTree(_ repo: RepoRef, ref: String, token: String) async -> [TreeEntry]? {
+            let url = "\(RepoDigestTool.apiRoot)/repos/\(repo.slug)/git/trees/\(RepoDigestTool.encodePath(ref))?recursive=1"
+            guard let body = await RepoDigestTool.get(url, token: token, accept: "application/vnd.github+json") else { return nil }
+            return RepoDigestTool.treeFromJSON(body)
+        }
+
+        func fetchRaw(_ repo: RepoRef, ref: String, path: String, token: String) async -> Data? {
+            await RepoDigestTool.bytes("\(RepoDigestTool.rawRoot)/\(repo.slug)/\(RepoDigestTool.encodePath(ref))/\(RepoDigestTool.encodePath(path))", token: token, accept: "text/plain")
+        }
+    }
+
+    /// GitLab (gitlab.com or self-hosted): the project id is the whole
+    /// `namespace/project` path percent-encoded, which is why `encodeProjectPath`
+    /// is separate from `encodePath`.
+    private struct GitLabAdapter: Adapter {
+        private let authHeader = "PRIVATE-TOKEN"
+
+        func defaultBranch(_ repo: RepoRef, token: String) async -> String? {
+            guard let body = await RepoDigestTool.get(projectURL(repo), token: token, accept: "application/json", authHeader: authHeader, authPrefix: ""),
+                  let data = body.data(using: .utf8),
+                  let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+            let branch = (root["default_branch"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return branch.isEmpty ? nil : branch
+        }
+
+        func listTree(_ repo: RepoRef, ref: String, token: String) async -> [TreeEntry]? {
+            var out: [TreeEntry] = []
+            var page = 1
+            // Paginated; a deep tree needs a handful of pages, and the cap keeps a
+            // pathological one from spending the whole turn here.
+            while page <= 10 {
+                let url = "\(projectURL(repo))/repository/tree?recursive=true&per_page=100&page=\(page)&ref=\(RepoDigestTool.encodePath(ref))"
+                guard let body = await RepoDigestTool.get(url, token: token, accept: "application/json", authHeader: authHeader, authPrefix: ""),
+                      let data = body.data(using: .utf8),
+                      let array = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { break }
+                for item in array {
+                    let path = item["path"] as? String ?? ""
+                    guard !path.isEmpty else { continue }
+                    let type = (item["type"] as? String ?? "") == "tree" ? "tree" : "blob"
+                    out.append(TreeEntry(path: path, type: type, size: 0))
+                }
+                if array.count < 100 { break }
+                page += 1
+            }
+            return out.isEmpty ? nil : out
+        }
+
+        func fetchRaw(_ repo: RepoRef, ref: String, path: String, token: String) async -> Data? {
+            await RepoDigestTool.bytes(
+                "\(projectURL(repo))/repository/files/\(RepoDigestTool.encodeProjectPath(path))/raw?ref=\(RepoDigestTool.encodePath(ref))",
+                token: token,
+                accept: "text/plain",
+                authHeader: authHeader,
+                authPrefix: ""
+            )
+        }
+
+        private func projectURL(_ repo: RepoRef) -> String {
+            "\(repo.origin)/api/v4/projects/\(RepoDigestTool.encodeProjectPath(repo.slug))"
+        }
+
+        /// Reachability + shape check for the unknown-host probe.
+        func probe(_ repo: RepoRef, token: String) async -> Bool {
+            await RepoDigestTool.get(projectURL(repo), token: token, accept: "application/json", authHeader: authHeader, authPrefix: "") != nil
+        }
+    }
+
+    /// Gitea and the family sharing its API (Forgejo, Gogs, Codeberg). The API is
+    /// deliberately GitHub-shaped, so the tree parse is shared; only the raw URL and
+    /// the auth header differ.
+    private struct GiteaAdapter: Adapter {
+        func defaultBranch(_ repo: RepoRef, token: String) async -> String? {
+            guard let body = await RepoDigestTool.get(repoURL(repo), token: token, accept: "application/json", authHeader: "Authorization", authPrefix: "token"),
+                  let data = body.data(using: .utf8),
+                  let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+            let branch = (root["default_branch"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return branch.isEmpty ? nil : branch
+        }
+
+        func listTree(_ repo: RepoRef, ref: String, token: String) async -> [TreeEntry]? {
+            var out: [TreeEntry] = []
+            var page = 1
+            while page <= 10 {
+                let url = "\(repoURL(repo))/git/trees/\(RepoDigestTool.encodePath(ref))?recursive=true&per_page=100&page=\(page)"
+                guard let body = await RepoDigestTool.get(url, token: token, accept: "application/json", authHeader: "Authorization", authPrefix: "token"),
+                      let parsed = RepoDigestTool.treeFromJSON(body) else { break }
+                out += parsed
+                if parsed.count < 100 { break }
+                page += 1
+            }
+            return out.isEmpty ? nil : out
+        }
+
+        func fetchRaw(_ repo: RepoRef, ref: String, path: String, token: String) async -> Data? {
+            await RepoDigestTool.bytes(
+                "\(repoURL(repo))/raw/\(RepoDigestTool.encodePath(path))?ref=\(RepoDigestTool.encodePath(ref))",
+                token: token,
+                accept: "text/plain",
+                authHeader: "Authorization",
+                authPrefix: "token"
+            )
+        }
+
+        private func repoURL(_ repo: RepoRef) -> String { "\(repo.origin)/api/v1/repos/\(repo.slug)" }
+
+        func probe(_ repo: RepoRef, token: String) async -> Bool {
+            await RepoDigestTool.get(repoURL(repo), token: token, accept: "application/json", authHeader: "Authorization", authPrefix: "token") != nil
+        }
+    }
+
+    /// Bitbucket Cloud: no recursive listing at all, so the tree is walked one
+    /// directory per page (bounded), and the raw endpoint is the same `src` URL the
+    /// web UI uses.
+    private struct BitbucketAdapter: Adapter {
+        private let pageLimit = 20
+
+        func defaultBranch(_ repo: RepoRef, token: String) async -> String? {
+            guard let body = await RepoDigestTool.get(apiURL(repo), token: token, accept: "application/json"),
+                  let data = body.data(using: .utf8),
+                  let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+            let name = ((root["mainbranch"] as? [String: Any])?["name"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty ? nil : name
+        }
+
+        func listTree(_ repo: RepoRef, ref: String, token: String) async -> [TreeEntry]? {
+            var out: [TreeEntry] = []
+            var queue: [String] = [""]
+            var calls = 0
+            while !queue.isEmpty, calls < pageLimit {
+                let dir = queue.removeFirst()
+                var next: String? = "\(apiURL(repo))/src/\(RepoDigestTool.encodePath(ref))/\(dir)?pagelen=100"
+                while let current = next, calls < pageLimit, out.count < 5_000 {
+                    guard let body = await RepoDigestTool.get(current, token: token, accept: "application/json"),
+                          let data = body.data(using: .utf8),
+                          let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+                        return out.isEmpty ? nil : out
+                    }
+                    calls += 1
+                    for item in (root["values"] as? [[String: Any]] ?? []) {
+                        let path = item["path"] as? String ?? ""
+                        guard !path.isEmpty else { continue }
+                        if (item["type"] as? String ?? "") == "commit_directory" {
+                            queue.append("\(path)/")
+                        } else {
+                            out.append(TreeEntry(path: path, type: "blob", size: item["size"] as? Int ?? 0))
+                        }
+                    }
+                    let following = (root["next"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    next = following.isEmpty ? nil : following
+                }
+            }
+            return out.isEmpty ? nil : out
+        }
+
+        func fetchRaw(_ repo: RepoRef, ref: String, path: String, token: String) async -> Data? {
+            await RepoDigestTool.bytes("\(apiURL(repo))/src/\(RepoDigestTool.encodePath(ref))/\(RepoDigestTool.encodePath(path))", token: token, accept: "text/plain")
+        }
+
+        private func apiURL(_ repo: RepoRef) -> String {
+            "https://api.bitbucket.org/2.0/repositories/\(repo.owner)/\(repo.repo)"
+        }
+    }
+
+    /// `group/project` → `group%2Fproject` (GitLab's project id).
+    static func encodeProjectPath(_ raw: String) -> String {
+        raw.addingPercentEncoding(withAllowedCharacters: RepoDigestTool.pathSegmentAllowed) ?? raw
     }
 }

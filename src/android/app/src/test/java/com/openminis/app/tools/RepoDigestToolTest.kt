@@ -76,9 +76,73 @@ class RepoDigestToolTest {
         )
     }
 
+    // ── multi-host shapes ───────────────────────────────────────────────────
+
+    @Test
+    fun `reads GitLab urls including the dash-tree form and self-hosted instances`() {
+        val gitlab = RepoDigestTool.parseRepoUrl("https://gitlab.com/group/project/-/tree/main/src")
+        assertEquals(RepoDigestTool.Provider.GITLAB, gitlab?.provider)
+        assertEquals("group/project", gitlab?.slug)
+        assertEquals("main", gitlab?.ref)
+        assertEquals("src", gitlab?.path)
+        assertEquals("https://gitlab.com", gitlab?.origin)
+
+        // Self-hosted GitLab is recognised by the `/-/` path, not by the hostname.
+        val selfHosted = RepoDigestTool.parseRepoUrl("https://git.company.example/team/app/-/blob/release/2.0/README.md")
+        assertEquals(RepoDigestTool.Provider.GITLAB, selfHosted?.provider)
+        assertEquals("https://git.company.example", selfHosted?.origin)
+        assertEquals("release", selfHosted?.ref)
+        assertEquals("2.0/README.md", selfHosted?.path)
+    }
+
+    @Test
+    fun `reads Gitea family urls including the src branch form`() {
+        val codeberg = RepoDigestTool.parseRepoUrl("https://codeberg.org/forgejo/forgejo/src/branch/main/routers")
+        assertEquals(RepoDigestTool.Provider.GITEA, codeberg?.provider)
+        assertEquals("main", codeberg?.ref)
+        assertEquals("routers", codeberg?.path)
+
+        val selfHosted = RepoDigestTool.parseRepoUrl("https://git.example.org/owner/repo/src/tag/v1.2.0/src")
+        assertEquals(RepoDigestTool.Provider.GITEA, selfHosted?.provider)
+        assertEquals("v1.2.0", selfHosted?.ref)
+        assertEquals("src", selfHosted?.path)
+
+        // A host nobody recognises is left UNKNOWN so it can be probed.
+        val unknown = RepoDigestTool.parseRepoUrl("https://git.my-company.io/team/repo")
+        assertEquals(RepoDigestTool.Provider.UNKNOWN, unknown?.provider)
+        assertEquals("https://git.my-company.io", unknown?.origin)
+    }
+
+    @Test
+    fun `reads Bitbucket urls`() {
+        val bitbucket = RepoDigestTool.parseRepoUrl("https://bitbucket.org/workspace/repo/src/master/app/main.py")
+        assertEquals(RepoDigestTool.Provider.BITBUCKET, bitbucket?.provider)
+        assertEquals("master", bitbucket?.ref)
+        assertEquals("app/main.py", bitbucket?.path)
+        assertEquals("workspace/repo", bitbucket?.slug)
+    }
+
+    @Test
+    fun `origin is kept so requests go back to the host the user named`() {
+        val ref = RepoDigestTool.parseRepoUrl("https://git.example.com/owner/repo")
+        assertEquals("https://git.example.com", ref?.origin)
+        assertEquals(RepoDigestTool.Provider.UNKNOWN, ref?.provider)
+        // Bare owner/repo stays GitHub, which is what the shape implies.
+        assertEquals(RepoDigestTool.Provider.GITHUB, RepoDigestTool.parseRepoUrl("owner/repo")?.provider)
+    }
+
+    @Test
+    fun `project paths are encoded for GitLab while file paths keep their slashes`() {
+        assertEquals("group%2Fproject", RepoDigestTool.encodeProjectPath("group/project"))
+        assertEquals("team%2Fsub%2Fapp", RepoDigestTool.encodeProjectPath("team/sub/app"))
+        assertEquals("src/main/Main.kt", RepoDigestTool.encodePath("src/main/Main.kt"))
+        assertEquals("dir/my%20file.kt", RepoDigestTool.encodePath("dir/my file.kt"))
+    }
+
     @Test
     fun `blob urls are recognised so a single file can be read directly`() {
         assertTrue(RepoDigestTool.isBlobLike("https://github.com/o/r/blob/main/a.kt"))
+        assertTrue(RepoDigestTool.isBlobLike("https://gitlab.com/g/p/-/blob/main/a.kt"))
         assertFalse(RepoDigestTool.isBlobLike("https://github.com/o/r/tree/main/src"))
     }
 

@@ -15,22 +15,35 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * [T-android-repo-digest] Read a GitHub repository the way gitingest does —
- * a file tree plus the contents of the files that matter — in ONE tool call.
+ * [T-android-repo-digest] Read a git repository as a digest — file tree plus the
+ * contents that matter — in ONE tool call, for the hosts gitingest supports and
+ * not just GitHub.
  *
  * Why this exists: given a repo link, the alternatives were
  *
  *  - `browser_use`, which reads one page at a time and cannot follow a tree; and
- *  - cloning it into the sandbox, which costs a full checkout (and a network
- *    round trip per object) before the first useful byte, then leaves the agent
- *    grep-ing a filesystem.
+ *  - cloning it into the sandbox, which costs a full checkout (and a network round
+ *    trip per object) before the first useful byte, then leaves the agent grep-ing
+ *    a filesystem.
  *
- * This asks GitHub what the tree IS (one API call), fetches only the files that
- * pass the filters from `raw.githubusercontent.com` (no API quota), and hands the
- * model a digest with explicit caps and an omitted-files note.
+ * Each host is read through its OWN API, because that is one request for the tree
+ * and no API quota for the file bodies:
  *
- * Host allowlist: only github.com / api.github.com / raw.githubusercontent.com.
- * The tool is not a general proxy — `web_fetch` is that, with its own SSRF guard.
+ *  - **GitHub** — `api.github.com/repos/…/git/trees` + `raw.githubusercontent.com`
+ *  - **GitLab** (gitlab.com and self-hosted) — `/api/v4/projects/<path>/repository/tree`
+ *    + `/repository/files/<path>/raw`
+ *  - **Gitea / Forgejo / Gogs / Codeberg** — `/api/v1/repos/…/git/trees` + `/raw/…`
+ *    (Gitea's API is deliberately GitHub-shaped, so one adapter covers the family)
+ *  - **Bitbucket Cloud** — `api.bitbucket.org/2.0/repositories/…/src/…` (walked: it
+ *    has no recursive listing)
+ *  - **anything else** — the Gitea-shaped API is probed first (most self-hosted
+ *    forges are Gitea/Forgejo/Gogs), then the GitLab shape; when neither answers,
+ *    the tool says so and points at `shell_execute` (`git clone --depth 1`) or
+ *    `web_fetch` rather than pretending the host is unsupported by design.
+ *
+ * Hosts are now arbitrary, so the SSRF guard runs on EVERY url this tool builds
+ * (origin included): private, loopback, link-local and metadata addresses stay
+ * unreachable even though the model chooses the repository.
  */
 object RepoDigestTool {
     const val NAME = "repo_digest"
@@ -52,30 +65,54 @@ object RepoDigestTool {
             .build()
     }
 
-    /** owner/repo/ref/path lifted out of any of the URL shapes GitHub uses. */
+    /** Git hosts the tool reads through their own API. */
+    enum class Provider(val label: String) {
+        GITHUB("GitHub"),
+        GITLAB("GitLab"),
+        GITEA("Gitea/Forgejo/Codeberg"),
+        BITBUCKET("Bitbucket Cloud"),
+        UNKNOWN("unknown host"),
+    }
+
+    /**
+     * owner/repo/ref/path lifted out of any of the URL shapes a forge uses, plus
+     * the origin and provider they were read from.
+     *
+     * [origin] is kept so every later request is built against the host the user
+     * actually named — which is also why the SSRF guard runs per request rather
+     * than once on the input URL: a self-hosted forge may live anywhere the guard
+     * allows, and nowhere it does not.
+     */
     data class RepoRef(
         val owner: String,
         val repo: String,
         val ref: String?,
         val path: String?,
+        val origin: String = "https://github.com",
+        val provider: Provider = Provider.GITHUB,
     ) {
         val slug: String get() = "$owner/$repo"
     }
 
+    /** One blob from a forge's tree listing. Internal so the rendering tests can build one. */
+    internal data class TreeEntry(val path: String, val type: String, val size: Int)
+
     fun definition(): AgentToolDefinition = AgentToolDefinition(
         name = NAME,
-        description = "Read a GitHub repository as a digest: the file tree plus the contents of the " +
-            "files that matter, in one call — like gitingest. Use this instead of cloning the repo or " +
-            "browsing it page by page. Understands repo, /tree/<branch>/<dir> and /blob/<branch>/<file> " +
-            "URLs; `format=tree` lists files only (cheapest way to find your way around), `format=files` " +
-            "(default) adds contents, `format=file` returns one file. Binary, vendored, minified and " +
-            "lock files are skipped automatically; `include`/`exclude` globs narrow that further. Public " +
-            "repos need no credentials; a token configured in Settings › Repository digest raises the " +
-            "GitHub API rate limit and reaches private repos.",
+        description = "Read a git repository as a digest: the file tree plus the contents of the files " +
+            "that matter, in one call — like gitingest. Use this instead of cloning the repo or browsing it " +
+            "page by page. Works with GitHub, GitLab (including self-hosted), Gitea/Forgejo/Codeberg/Gogs, " +
+            "Bitbucket Cloud, and probes other hosts with both API shapes before giving up. Understands repo, " +
+            "`/tree/<ref>/<dir>`, `/-/tree/<ref>/<dir>`, `/src/branch/<ref>/<dir>` and the matching blob URLs; " +
+            "`format=tree` lists files only (cheapest way to find your way around), `format=files` (default) " +
+            "adds contents, `format=file` returns one file. Binary, vendored, minified and lock files are " +
+            "skipped automatically; `include`/`exclude` globs narrow that further. Public repos need no " +
+            "credentials; tokens configured in Settings › Repository digest raise the API limits and reach " +
+            "private repos.",
         parameters = mapOf(
             "tool_title" to AgentToolParam("string", "A concise 5-10 word summary (e.g. 'Digest fastapi repo')."),
-            "url" to AgentToolParam("string", "GitHub repository, directory or file URL (or 'owner/repo')."),
-            "ref" to AgentToolParam("string", "Branch, tag or commit SHA (default: the repo's default branch, or the one in the URL)."),
+            "url" to AgentToolParam("string", "Repository, directory or file URL — any supported host — or 'owner/repo' for GitHub."),
+            "ref" to AgentToolParam("string", "Branch, tag or commit SHA (default: the repo's default branch, or the one in the URL). Required for a branch whose name contains a slash on hosts that put the ref in the path (Bitbucket)."),
             "path" to AgentToolParam("string", "Restrict to this directory or file path inside the repo."),
             "include" to AgentToolParam("string", "Comma-separated globs that files must match (e.g. '*.kt,src/**')."),
             "exclude" to AgentToolParam("string", "Comma-separated globs to skip (e.g. '**/test/**,docs/**')."),
@@ -100,7 +137,7 @@ object RepoDigestTool {
         val toolTitle = args.optString("tool_title", NAME)
         val repo = parseRepoUrl(args.optString("url", ""))
             ?: return ToolExecutionResult(
-                "repo_digest: expected a github.com repository, /tree/… or /blob/… URL (or owner/repo)",
+                "repo_digest: expected a repository, /tree/…, /-/tree/…, /src/branch/… or /blob/… URL (or owner/repo)",
                 false,
                 toolTitle = toolTitle,
             )
@@ -111,24 +148,50 @@ object RepoDigestTool {
         val maxChars = args.optInt("max_chars", DEFAULT_MAX_CHARS).coerceIn(500, HARD_MAX_CHARS)
         val include = parseGlobs(args.optString("include", ""))
         val exclude = parseGlobs(args.optString("exclude", ""))
-        val token = RepoDigestPrefs.token(context)
+        // The token matching the host the URL names; an unrecognised host gets
+        // whichever token is configured, so the probe can reach a private instance.
+        var token = RepoDigestPrefs.token(context, repo.provider)
 
         return try {
-            val ref = explicitRef.ifBlank { repo.ref.orEmpty() }.ifBlank { defaultBranch(repo, token) }
+            // Unknown hosts are probed once, here: Gitea's API first (most
+            // self-hosted forges are Gitea/Forgejo/Gogs), then GitLab's. Probing per
+            // FILE would multiply the cost of every fetch, so it is resolved up front.
+            val provider = resolveProvider(repo, token)
+            val target = repo.copy(provider = provider)
+            if (provider == Provider.UNKNOWN) {
+                return ToolExecutionResult(
+                    "repo_digest: ${target.origin} did not answer either the Gitea or the GitLab API. " +
+                        "If it is a plain git server, clone it with shell_execute " +
+                        "(`git clone --depth 1 <url>`), or fetch a single file with web_fetch.",
+                    false,
+                    toolTitle = toolTitle,
+                )
+            }
+            // Re-read now that the probe identified the host: the sentinel that let
+            // the probe run is not necessarily that provider's own token.
+            token = RepoDigestPrefs.token(context, provider)
+            val adapter = adapterFor(provider)
+
+            // `HEAD` is the last resort: an unauthenticated host may refuse the repo
+            // metadata call while still serving an explicit ref, and "the default
+            // branch" is what every forge understands `HEAD` to mean.
+            val ref = explicitRef.ifBlank { repo.ref.orEmpty() }
+                .ifBlank { adapter.defaultBranch(target, token) ?: "HEAD" }
             val wantedPath = pathArg.ifBlank { repo.path.orEmpty() }
-            val wantSingleFile = format == "file" || (wantedPath.isNotEmpty() && isBlobLike(args.optString("url", "")))
+            val wantSingleFile = format == "file" || isBlobLike(args.optString("url", ""))
 
             if (wantSingleFile && wantedPath.isNotEmpty()) {
-                val content = fetchRaw(repo, ref, wantedPath, token)
+                val content = adapter.fetchRaw(target, ref, wantedPath, token)
                     ?: return ToolExecutionResult(
-                        "repo_digest: could not read $wantedPath at $ref (wrong path or private repo without a token?)",
+                        "repo_digest: could not read $wantedPath at $ref on ${provider.label} " +
+                            "(wrong path, or private repo without a token?)",
                         false,
                         toolTitle = toolTitle,
                     )
                 val text = String(content, Charsets.UTF_8)
                 return ToolExecutionResult(
                     buildString {
-                        appendLine("Repo: ${repo.slug} @ $ref")
+                        appendLine("Repo: ${target.origin}/${target.slug} @ $ref")
                         appendLine("File: $wantedPath (${content.size} bytes)")
                         appendLine()
                         append(sanitize(text, maxChars))
@@ -138,21 +201,23 @@ object RepoDigestTool {
                 )
             }
 
-            val entries = listTree(repo, ref, token)
+            val entries = adapter.listTree(target, ref, token)
                 ?: return ToolExecutionResult(
-                    "repo_digest: GitHub did not return a tree for ${repo.slug} @ $ref " +
-                        "(rate limit? configure a token in Settings › Repository digest)",
+                    "repo_digest: ${provider.label} did not return a tree for ${target.slug} @ $ref " +
+                        "(rate limit, wrong ref, or private repo without a token?)",
                     false,
                     toolTitle = toolTitle,
                 )
 
             val matching = entries.filter { entry ->
-                entry.type == "blob" &&
+                entry.type != "tree" &&
                     (wantedPath.isEmpty() || entry.path == wantedPath || entry.path.startsWith("$wantedPath/")) &&
                     matchesGlobs(entry.path, include, exclude) &&
                     !shouldSkip(entry.path)
             }.sortedBy { it.path }
 
+            // A host that reports no size (GitLab, Bitbucket directories) reports 0:
+            // it passes the size filter and the read itself is what caps the bytes.
             val fetchable = matching.filter { it.size <= MAX_FILE_BYTES }
             val tooBig = matching.size - fetchable.size
             val selected = if (format == "tree") emptyList() else fetchable.take(maxFiles)
@@ -166,14 +231,14 @@ object RepoDigestTool {
                     selected.map { entry ->
                         async {
                             gate.withPermit {
-                                entry.path to fetchRaw(repo, ref, entry.path, token)
+                                entry.path to adapter.fetchRaw(target, ref, entry.path, token)
                             }
                         }
                     }.awaitAll().toMap()
                 }
             }
 
-            val treeLine = "Repo: ${repo.slug} @ $ref" +
+            val treeLine = "Repo: ${target.origin}/${target.slug} @ $ref (${provider.label})" +
                 (if (wantedPath.isNotEmpty()) " (path: $wantedPath)" else "") +
                 "\nFiles: ${matching.size} matched" +
                 (if (format == "tree") "" else ", ${selected.size} included") +
@@ -211,53 +276,104 @@ object RepoDigestTool {
         }
     }
 
-    // ── pure helpers (unit-tested) ──────────────────────────────────────────
+    // ── URL shapes and host detection ───────────────────────────────────────
 
     /**
-     * Parse any of the shapes a user actually pastes: bare `owner/repo`, a repo
-     * URL, a `/tree/<ref>/<dir>` link, a `/blob/<ref>/<file>` link, with or
-     * without scheme. A branch containing slashes is disambiguated against the
-     * known ref unless [knownRefs] is null, in which case the first segment wins —
-     * the API call in [defaultBranch]/[listTree] corrects it when it 404s.
+     * Provider detection from the host, then from the URL's own shape. The shape
+     * matters for self-hosted instances: `/-/tree/` is GitLab's signature (stock
+     * GitLab, or GitLab CE on a company domain), `/src/branch/` is Gitea's, and both
+     * are far more reliable than trying to recognise hostnames.
+     */
+    internal fun detectProvider(host: String, url: String): Provider {
+        val h = host.lowercase()
+        return when {
+            h == "github.com" || h.endsWith(".github.com") -> Provider.GITHUB
+            h == "gitlab.com" || h.endsWith(".gitlab.com") || url.contains("/-/") -> Provider.GITLAB
+            h == "codeberg.org" || h.contains("gitea") || h.contains("forgejo") || h.contains("gogs") -> Provider.GITEA
+            h == "bitbucket.org" || h.endsWith(".bitbucket.org") -> Provider.BITBUCKET
+            url.contains("/src/branch/") || url.contains("/src/tag/") || url.contains("/src/commit/") -> Provider.GITEA
+            else -> Provider.UNKNOWN
+        }
+    }
+
+    /**
+     * Parse any of the shapes a user actually pastes, for any supported forge: bare
+     * `owner/repo`, a repo URL, `/tree/<ref>/<dir>` (GitHub), `/-/tree/<ref>/<dir>`
+     * (GitLab), `/src/branch/<ref>/<dir>` (Gitea), `/src/<ref>/<dir>` (Bitbucket),
+     * and the matching `/blob/…` forms.
      */
     internal fun parseRepoUrl(rawUrl: String, knownRefs: Set<String>? = null): RepoRef? {
         var s = rawUrl.trim()
         if (s.isEmpty()) return null
-        s = s.removePrefix("https://").removePrefix("http://")
-        s = s.removePrefix("www.")
-        if (s.startsWith("github.com/")) s = s.removePrefix("github.com/")
+        var origin = "https://github.com"
+        if (s.startsWith("http://") || s.startsWith("https://")) {
+            val schemeEnd = s.indexOf("://") + 3
+            val hostEnd = s.indexOf('/', schemeEnd).let { if (it < 0) s.length else it }
+            origin = s.substring(0, hostEnd)
+            s = s.substring(hostEnd).trimStart('/')
+        } else {
+            s = s.removePrefix("www.")
+            if (s.startsWith("github.com/")) {
+                s = s.removePrefix("github.com/")
+            } else if (!s.contains("://") && s.contains('.') && s.contains('/')) {
+                // A bare `gitlab.com/owner/repo` or `codeberg.org/owner/repo`.
+                val hostEnd = s.indexOf('/')
+                origin = "https://${s.substring(0, hostEnd)}"
+                s = s.substring(hostEnd).trimStart('/')
+            }
+        }
         s = s.substringBefore('?').substringBefore('#').trimEnd('/')
         if (s.isEmpty()) return null
+        val host = origin.substringAfter("://").substringBefore('/')
+        val provider = detectProvider(host, rawUrl)
         val parts = s.split('/').filter { it.isNotEmpty() }
         if (parts.size < 2) return null
         val owner = parts[0]
         var repo = parts[1].removeSuffix(".git")
         if (owner.isEmpty() || repo.isEmpty()) return null
+
+        // GitLab marks its UI paths with `/-/`; drop it before reading ref/path.
+        val rest = parts.drop(2).let { if (it.firstOrNull() == "-") it.drop(1) else it }
         var ref: String? = null
         var path: String? = null
-        if (parts.size >= 3 && (parts[2] == "tree" || parts[2] == "blob")) {
-            val rest = parts.drop(3)
-            if (rest.isEmpty()) return RepoRef(owner, repo, null, null)
-            if (knownRefs != null) {
-                // Longest matching ref wins, so `feature/x` beats `feature`.
-                val match = knownRefs.filter { known -> rest.joinToString("/").startsWith(known) }
-                    .maxByOrNull { it.length }
-                if (match != null) {
-                    ref = match
-                    path = rest.joinToString("/").removePrefix(match).trimStart('/').ifEmpty { null }
-                    return RepoRef(owner, repo, ref, path)
-                }
+        when {
+            rest.size >= 2 && (rest[0] == "tree" || rest[0] == "blob") -> {
+                ref = rest[1]
+                path = rest.drop(2).joinToString("/").ifEmpty { null }
             }
-            ref = rest.first()
-            path = rest.drop(1).joinToString("/").ifEmpty { null }
-        } else if (parts.size > 2) {
-            // Not a tree/blob link: treat the tail as a path on the default branch.
-            path = parts.drop(2).joinToString("/")
+            // Gitea: /src/branch/<branch>/<path>, /src/tag/<tag>/…, /src/commit/<sha>/…
+            // Provider-gated, because `/src/` is an ordinary DIRECTORY on GitHub and
+            // GitLab: without the gate, `github.com/o/r/src/main` would be read as
+            // "branch main" instead of "the path src/main".
+            rest.size >= 3 && rest[0] == "src" && rest[1] in listOf("branch", "tag", "commit") &&
+                provider == Provider.GITEA -> {
+                ref = rest[2]
+                path = rest.drop(3).joinToString("/").ifEmpty { null }
+            }
+            // Bitbucket: /src/<ref>/<path> — same gate, same reason; and the ref is
+            // the first segment, so a branch containing a slash goes via `ref=`.
+            rest.size >= 2 && rest[0] == "src" && provider == Provider.BITBUCKET -> {
+                ref = rest[1]
+                path = rest.drop(2).joinToString("/").ifEmpty { null }
+            }
+            else -> path = rest.joinToString("/").ifEmpty { null }
         }
-        return RepoRef(owner, repo, ref, path)
+        // A branch containing slashes is only resolvable against the real ref list.
+        if (ref != null && knownRefs != null) {
+            val candidate = (listOf(ref) + (path?.split('/') ?: emptyList())).joinToString("/")
+            val match = knownRefs.filter { candidate.startsWith(it) }.maxByOrNull { it.length }
+            if (match != null) {
+                ref = match
+                path = candidate.removePrefix(match).trimStart('/').ifEmpty { null }
+            }
+        }
+        return RepoRef(owner, repo, ref, path, origin, provider)
     }
 
-    internal fun isBlobLike(rawUrl: String): Boolean = rawUrl.contains("/blob/")
+    internal fun isBlobLike(rawUrl: String): Boolean =
+        rawUrl.contains("/blob/") || rawUrl.contains("/-/blob/")
+
+    // ── pure helpers (unit-tested) ──────────────────────────────────────────
 
     internal fun parseGlobs(raw: String): List<String> =
         raw.split(',', '\n').map { it.trim() }.filter { it.isNotEmpty() }
@@ -365,58 +481,91 @@ object RepoDigestTool {
         return withoutNul.take(maxChars) + "\n… [file truncated at $maxChars chars]"
     }
 
-    // ── network ─────────────────────────────────────────────────────────────
+    /** Path segments are percent-encoded but slashes stay: refs and paths contain them. */
+    internal fun encodePath(raw: String): String =
+        raw.split('/').joinToString("/") { segment ->
+            java.net.URLEncoder.encode(segment, "UTF-8").replace("+", "%20")
+        }
 
-    /** One blob from the GitHub tree. Internal so the rendering tests can build one. */
-    internal data class TreeEntry(val path: String, val type: String, val size: Int)
+    /** `group/project` → `group%2Fproject` (GitLab's project id). */
+    internal fun encodeProjectPath(raw: String): String =
+        java.net.URLEncoder.encode(raw, "UTF-8").replace("+", "%20")
 
-    private fun request(url: String, token: String, accept: String): Request.Builder {
+    // ── providers ───────────────────────────────────────────────────────────
+
+    /**
+     * One adapter per provider: the same three questions (what is the default
+     * branch, what is in the tree, what is in this file) asked the way that host
+     * wants them asked.
+     */
+    private interface Adapter {
+        suspend fun defaultBranch(repo: RepoRef, token: String): String?
+        suspend fun listTree(repo: RepoRef, ref: String, token: String): List<TreeEntry>?
+        suspend fun fetchRaw(repo: RepoRef, ref: String, path: String, token: String): ByteArray?
+    }
+
+    private fun adapterFor(provider: Provider): Adapter = when (provider) {
+        Provider.GITHUB -> GitHubAdapter
+        Provider.GITLAB -> GitLabAdapter
+        Provider.GITEA -> GiteaAdapter
+        Provider.BITBUCKET -> BitbucketAdapter
+        // Unresolved: use the shape the probe tried first, so the adapter and the
+        // resolution cannot disagree about what the host turned out to be.
+        Provider.UNKNOWN -> GiteaAdapter
+    }
+
+    /** Probe an unrecognised host: Gitea shape first, then GitLab. */
+    private suspend fun resolveProvider(repo: RepoRef, token: String): Provider {
+        if (repo.provider != Provider.UNKNOWN) return repo.provider
+        if (GiteaAdapter.probe(repo, token)) return Provider.GITEA
+        if (GitLabAdapter.probe(repo, token)) return Provider.GITLAB
+        return Provider.UNKNOWN
+    }
+
+    private fun request(
+        url: String,
+        token: String,
+        accept: String,
+        authHeader: String = "Authorization",
+        authPrefix: String = "Bearer",
+    ): Request.Builder {
         val builder = Request.Builder()
             .url(url)
             .header("User-Agent", "OpenMinis/repo_digest")
             .header("Accept", accept)
-        if (token.isNotBlank()) builder.header("Authorization", "Bearer $token")
+        if (token.isNotBlank()) builder.header(authHeader, if (authPrefix.isEmpty()) token else "$authPrefix $token")
         return builder
     }
 
-    private fun defaultBranch(repo: RepoRef, token: String): String {
-        val body = get("$API_ROOT/repos/${repo.slug}", token, "application/vnd.github+json") ?: return "HEAD"
+    private fun get(
+        url: String,
+        token: String,
+        accept: String,
+        authHeader: String = "Authorization",
+        authPrefix: String = "Bearer",
+    ): String? {
+        // Hosts are arbitrary now, so the guard runs on every URL we build.
+        FetchUrlGuard.blockedReason(url)?.let { return null }
         return try {
-            JSONObject(body).optString("default_branch", "HEAD").ifBlank { "HEAD" }
-        } catch (_: Exception) {
-            "HEAD"
-        }
-    }
-
-    private fun listTree(repo: RepoRef, ref: String, token: String): List<TreeEntry>? {
-        val body = get(
-            "$API_ROOT/repos/${repo.slug}/git/trees/${encodePath(ref)}?recursive=1",
-            token,
-            "application/vnd.github+json",
-        ) ?: return null
-        return try {
-            val root = JSONObject(body)
-            val array = root.optJSONArray("tree") ?: return null
-            buildList {
-                for (i in 0 until array.length()) {
-                    val item = array.optJSONObject(i) ?: continue
-                    val path = item.optString("path")
-                    if (path.isEmpty()) continue
-                    add(TreeEntry(path, item.optString("type"), item.optInt("size", 0)))
-                }
+            client.newCall(request(url, token, accept, authHeader, authPrefix).get().build()).execute().use { response ->
+                if (!response.isSuccessful) return null
+                response.body?.string()
             }
         } catch (_: Exception) {
             null
         }
     }
 
-    private fun fetchRaw(repo: RepoRef, ref: String, path: String, token: String): ByteArray? {
-        val url = "$RAW_ROOT/${repo.owner}/${repo.repo}/${encodePath(ref)}/${encodePath(path)}"
-        // The raw host is allowlisted, but the guard still runs: a redirect could
-        // point anywhere, and the DNS check is free.
+    private fun bytes(
+        url: String,
+        token: String,
+        accept: String,
+        authHeader: String = "Authorization",
+        authPrefix: String = "Bearer",
+    ): ByteArray? {
         FetchUrlGuard.blockedReason(url)?.let { return null }
         return try {
-            client.newCall(request(url, token, "text/plain").get().build()).execute().use { response ->
+            client.newCall(request(url, token, accept, authHeader, authPrefix).get().build()).execute().use { response ->
                 if (!response.isSuccessful) return null
                 val body = response.body ?: return null
                 body.source().readByteArray(minOf(body.contentLength().coerceAtLeast(0), MAX_FILE_BYTES.toLong()))
@@ -426,21 +575,203 @@ object RepoDigestTool {
         }
     }
 
-    private fun get(url: String, token: String, accept: String): String? {
-        FetchUrlGuard.blockedReason(url)?.let { return null }
-        return try {
-            client.newCall(request(url, token, accept).get().build()).execute().use { response ->
-                if (!response.isSuccessful) return null
-                response.body?.string()
-            }
+    private fun treeFromJson(body: String): List<TreeEntry>? {
+        val array = try {
+            JSONObject(body).optJSONArray("tree") ?: return null
         } catch (_: Exception) {
-            null
+            return null
+        }
+        return buildList {
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                val path = item.optString("path")
+                if (path.isEmpty()) continue
+                add(TreeEntry(path, item.optString("type"), item.optInt("size", 0)))
+            }
         }
     }
 
-    /** Path segments are percent-encoded but slashes stay: refs and paths contain them. */
-    internal fun encodePath(raw: String): String =
-        raw.split('/').joinToString("/") { segment ->
-            java.net.URLEncoder.encode(segment, "UTF-8").replace("+", "%20")
+    /** GitHub: the shape this tool started as. */
+    private object GitHubAdapter : Adapter {
+        override suspend fun defaultBranch(repo: RepoRef, token: String): String? {
+            val body = get("$API_ROOT/repos/${repo.slug}", token, "application/vnd.github+json") ?: return null
+            return try {
+                JSONObject(body).optString("default_branch").ifBlank { null }
+            } catch (_: Exception) {
+                null
+            }
         }
+
+        override suspend fun listTree(repo: RepoRef, ref: String, token: String): List<TreeEntry>? =
+            get("$API_ROOT/repos/${repo.slug}/git/trees/${encodePath(ref)}?recursive=1", token, "application/vnd.github+json")
+                ?.let(::treeFromJson)
+
+        override suspend fun fetchRaw(repo: RepoRef, ref: String, path: String, token: String): ByteArray? =
+            bytes("$RAW_ROOT/${repo.slug}/${encodePath(ref)}/${encodePath(path)}", token, "text/plain")
+    }
+
+    /**
+     * GitLab (gitlab.com or self-hosted): the project id is the whole
+     * `namespace/project` path percent-encoded, which is why [encodeProjectPath] is
+     * separate from [encodePath].
+     */
+    private object GitLabAdapter : Adapter {
+        private const val AUTH_HEADER = "PRIVATE-TOKEN"
+
+        override suspend fun defaultBranch(repo: RepoRef, token: String): String? {
+            val body = get(projectUrl(repo), token, "application/json", authHeader = AUTH_HEADER, authPrefix = "") ?: return null
+            return try {
+                JSONObject(body).optString("default_branch").ifBlank { null }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        override suspend fun listTree(repo: RepoRef, ref: String, token: String): List<TreeEntry>? {
+            val out = mutableListOf<TreeEntry>()
+            var page = 1
+            // Paginated; a deep tree needs a handful of pages, and the cap keeps a
+            // pathological one from spending the whole turn here.
+            while (page <= 10) {
+                val url = "${projectUrl(repo)}/repository/tree?recursive=true&per_page=100&page=$page&ref=${encodePath(ref)}"
+                val body = get(url, token, "application/json", authHeader = AUTH_HEADER, authPrefix = "") ?: break
+                val array = try {
+                    JSONArray(body)
+                } catch (_: Exception) {
+                    break
+                }
+                for (i in 0 until array.length()) {
+                    val item = array.optJSONObject(i) ?: continue
+                    val path = item.optString("path")
+                    if (path.isEmpty()) continue
+                    out.add(TreeEntry(path, if (item.optString("type") == "tree") "tree" else "blob", 0))
+                }
+                if (array.length() < 100) break
+                page++
+            }
+            return out.ifEmpty { null }
+        }
+
+        override suspend fun fetchRaw(repo: RepoRef, ref: String, path: String, token: String): ByteArray? =
+            bytes(
+                "${projectUrl(repo)}/repository/files/${encodeProjectPath(path)}/raw?ref=${encodePath(ref)}",
+                token,
+                "text/plain",
+                authHeader = AUTH_HEADER,
+                authPrefix = "",
+            )
+
+        private fun projectUrl(repo: RepoRef): String =
+            "${repo.origin}/api/v4/projects/${encodeProjectPath(repo.slug)}"
+
+        /** Reachability + shape check for the unknown-host probe. */
+        suspend fun probe(repo: RepoRef, token: String): Boolean =
+            get(projectUrl(repo), token, "application/json", authHeader = AUTH_HEADER, authPrefix = "") != null
+    }
+
+    /**
+     * Gitea and the family sharing its API (Forgejo, Gogs, Codeberg). The API is
+     * deliberately GitHub-shaped, so the tree parse is shared; only the raw URL and
+     * the auth header differ.
+     */
+    private object GiteaAdapter : Adapter {
+        override suspend fun defaultBranch(repo: RepoRef, token: String): String? {
+            val body = get(repoUrl(repo), token, "application/json", authHeader = "Authorization", authPrefix = "token")
+                ?: return null
+            return try {
+                JSONObject(body).optString("default_branch").ifBlank { null }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        override suspend fun listTree(repo: RepoRef, ref: String, token: String): List<TreeEntry>? {
+            val out = mutableListOf<TreeEntry>()
+            var page = 1
+            while (page <= 10) {
+                val body = get(
+                    "${repoUrl(repo)}/git/trees/${encodePath(ref)}?recursive=true&per_page=100&page=$page",
+                    token,
+                    "application/json",
+                    authHeader = "Authorization",
+                    authPrefix = "token",
+                ) ?: break
+                val parsed = treeFromJson(body) ?: break
+                out += parsed
+                if (parsed.size < 100) break
+                page++
+            }
+            return out.ifEmpty { null }
+        }
+
+        override suspend fun fetchRaw(repo: RepoRef, ref: String, path: String, token: String): ByteArray? =
+            bytes(
+                "${repoUrl(repo)}/raw/${encodePath(path)}?ref=${encodePath(ref)}",
+                token,
+                "text/plain",
+                authHeader = "Authorization",
+                authPrefix = "token",
+            )
+
+        private fun repoUrl(repo: RepoRef): String = "${repo.origin}/api/v1/repos/${repo.slug}"
+
+        suspend fun probe(repo: RepoRef, token: String): Boolean =
+            get(repoUrl(repo), token, "application/json", authHeader = "Authorization", authPrefix = "token") != null
+    }
+
+    /**
+     * Bitbucket Cloud: no recursive listing at all, so the tree is walked one
+     * directory per page (bounded), and the raw endpoint is the same `src` URL the
+     * web UI uses.
+     */
+    private object BitbucketAdapter : Adapter {
+        private const val PAGE_LIMIT = 20
+
+        override suspend fun defaultBranch(repo: RepoRef, token: String): String? {
+            val body = get(apiUrl(repo), token, "application/json") ?: return null
+            return try {
+                JSONObject(body).optJSONObject("mainbranch")?.optString("name")?.ifBlank { null }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        override suspend fun listTree(repo: RepoRef, ref: String, token: String): List<TreeEntry>? {
+            val out = mutableListOf<TreeEntry>()
+            val queue = ArrayDeque(listOf(""))
+            var calls = 0
+            while (queue.isNotEmpty() && calls < PAGE_LIMIT) {
+                val dir = queue.removeFirst()
+                var next: String? = "${apiUrl(repo)}/src/${encodePath(ref)}/$dir?pagelen=100"
+                while (next != null && calls < PAGE_LIMIT && out.size < 5_000) {
+                    val body = get(next, token, "application/json") ?: return out.ifEmpty { null }
+                    calls++
+                    val root = try {
+                        JSONObject(body)
+                    } catch (_: Exception) {
+                        return out.ifEmpty { null }
+                    }
+                    val values = root.optJSONArray("values") ?: JSONArray()
+                    for (i in 0 until values.length()) {
+                        val item = values.optJSONObject(i) ?: continue
+                        val path = item.optString("path")
+                        if (path.isEmpty()) continue
+                        if (item.optString("type") == "commit_directory") {
+                            queue.add("$path/")
+                        } else {
+                            out.add(TreeEntry(path, "blob", item.optInt("size", 0)))
+                        }
+                    }
+                    next = root.optString("next").ifBlank { null }
+                }
+            }
+            return out.ifEmpty { null }
+        }
+
+        override suspend fun fetchRaw(repo: RepoRef, ref: String, path: String, token: String): ByteArray? =
+            bytes("${apiUrl(repo)}/src/${encodePath(ref)}/${encodePath(path)}", token, "text/plain")
+
+        private fun apiUrl(repo: RepoRef): String =
+            "https://api.bitbucket.org/2.0/repositories/${repo.owner}/${repo.repo}"
+    }
 }
