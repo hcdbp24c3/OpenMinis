@@ -1926,4 +1926,10 @@
     <string name="sub_agent_builtin_reviewer_description">Prüft eine Änderung oder eine Datei auf Korrektheit, Sicherheit und Testabdeckung und meldet konkrete Befunde mit Datei und Zeile. Angewiesen, nichts zu reparieren: der Befund ist das Ergebnis.</string>
     <string name="sub_agent_builtin_tester_name">Testlauf-Subagent</string>
     <string name="sub_agent_builtin_tester_description">Prüft eine Änderung, indem er Build und Tests des Projekts in der Sandbox ausführt, und meldet den genauen Befehl, dessen Ausgabe und den Exit-Status — grün oder rot, mit Beleg.</string>
+    <string name="sub_agent_builtin_researcher_name">Recherche-Subagent</string>
+    <string name="sub_agent_builtin_researcher_description">Beantwortet eine Frage aus Quellen AUSSERHALB: mehrere Suchanfragen, die wirklich relevanten Seiten lesen, Aussagen gegengeprüfen und mit URLs melden. Sagt es, wenn Quellen sich widersprechen.</string>
+    <string name="sub_agent_builtin_debugger_name">Debugger-Subagent</string>
+    <string name="sub_agent_builtin_debugger_description">Findet die URSACHE eines Fehlers: reproduzieren, auf den kleinsten Fall verkleinern, eine Hypothese nach der anderen prüfen und die Ursache mit Beleg melden. Angewiesen, nichts zu reparieren.</string>
+    <string name="sub_agent_builtin_architect_name">Architektur-Subagent</string>
+    <string name="sub_agent_builtin_architect_description">Entscheidet vor dem Code, wie eine Änderung gebaut wird: bestehende Umsetzung lesen, zwei oder drei Optionen abwägen und einen Plan mit Abwägungen und Unbekanntem liefern.</string>
 </resources>

@@ -2174,4 +2174,10 @@
     <string name="sub_agent_builtin_reviewer_description">審查一處變更或一個檔案，關注正確性、安全與測試覆蓋，並給出帶檔案與行號的具體發現。已要求它不要動手修：發現本身就是交付物。</string>
     <string name="sub_agent_builtin_tester_name">測試執行子代理</string>
     <string name="sub_agent_builtin_tester_description">在沙箱中執行專案的建置與測試來驗證變更，然後回報確切的指令、輸出與結束狀態——通過或失敗都要附上證據。</string>
+    <string name="sub_agent_builtin_researcher_name">研究子代理</string>
+    <string name="sub_agent_builtin_researcher_description">從外部來源回答一個問題：跑多組檢索、讀真正有用的頁面、交叉核對它們的主張，並連同 URL 一起回報。來源互相矛盾時會直說。</string>
+    <string name="sub_agent_builtin_debugger_name">除錯子代理</string>
+    <string name="sub_agent_builtin_debugger_description">找出故障的根因：重現它、縮小到最小案例、一次驗證一個假設，並帶著證據回報根因。已要求它不要動手修。</string>
+    <string name="sub_agent_builtin_architect_name">架構子代理</string>
+    <string name="sub_agent_builtin_architect_description">在寫任何程式碼之前先決定改動該怎麼做：先讀現有實作，權衡兩三個方案，給出帶取捨與未知項的計畫。</string>
 </resources>

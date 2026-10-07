@@ -130,7 +130,7 @@ struct SubAgentsCollection: ConfigCollection {
         // Checked before writing so the CLI reports the limit instead of the
         // store silently declining the append.
         guard store.canAddSubAgent else {
-            throw ConfigError.invalidValue("You can define at most \(SubAgentLimits.maxCount) sub agents (including the built-in one). Remove one first.")
+            throw ConfigError.invalidValue("You can define at most \(SubAgentLimits.maxCustom) sub agents (including the built-in one). Remove one first.")
         }
 
         var thinking: ThinkingLevel? = nil

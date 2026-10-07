@@ -553,7 +553,7 @@ extension ConfigRegistry {
                 }
                 return .object([
                     "count": .int(items.count),
-                    "max": .int(SubAgentLimits.maxCount),
+                    "max": .int(SubAgentLimits.maxCustom),
                     "agents": .array(items),
                 ])
             }

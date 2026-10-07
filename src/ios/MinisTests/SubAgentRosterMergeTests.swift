@@ -8,7 +8,7 @@ import XCTest
 /// "coding-agent" therefore produce two records that are distinct by id and
 /// identical to the model: the roster is injected every turn so the duplicate
 /// costs prompt budget on all of them, `resolve` can only reach the first, and
-/// both consume one of the ten `SubAgentLimits.maxCount` slots.
+/// both consume one of the nine `SubAgentLimits.maxCustom` slots.
 ///
 /// These run against the pure merge function rather than the async sync path,
 /// which is why it was factored out as a static.
@@ -180,7 +180,7 @@ final class SubAgentRosterMergeTests: XCTestCase {
         let remote = (0..<9).map { agent("remote-\($0)", id: "r\($0)") }
 
         let merged = SubAgentRoster.merge(local: local, remote: remote)
-        XCTAssertLessThanOrEqual(merged.count, SubAgentLimits.maxCount,
+        XCTAssertLessThanOrEqual(merged.filter { !$0.isBuiltIn }.count, SubAgentLimits.maxCustom,
                                  "normalize's count bound must survive the merge")
         XCTAssertEqual(merged.first?.id, SubAgentDefinition.builtInId)
     }

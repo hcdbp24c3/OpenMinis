@@ -10976,6 +10976,216 @@
         }
       }
     },
+    "Research Sub Agent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Research Sub Agent"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Podagent za istraživanje"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リサーチサブエージェント"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "研究子代理"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "研究子代理"
+          }
+        }
+      }
+    },
+    "Answer a question from OUTSIDE sources: run several search queries, read the pages that matter, cross-check what they claim, and report it with the URLs. Says when sources disagree." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Answer a question from OUTSIDE sources: run several search queries, read the pages that matter, cross-check what they claim, and report it with the URLs. Says when sources disagree."
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Odgovara na pitanje iz VANJSKIH izvora: pokreće više upita, čita stranice koje su važne, provjerava tvrdnje i izvještava s URL-ovima. Kaže kada se izvori proturječe."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "外部の情報源から問いに答える：複数の検索クエリを投げ、本当に重要なページを読み、主張を突き合わせ、URL とともに報告する。情報源が食い違う場合は明言する。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从外部来源回答一个问题：跑多组检索、读真正有用的页面、交叉核对它们的主张，并连同 URL 一起汇报。来源互相矛盾时会直说。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從外部來源回答一個問題：跑多組檢索、讀真正有用的頁面、交叉核對它們的主張，並連同 URL 一起回報。來源互相矛盾時會直說。"
+          }
+        }
+      }
+    },
+    "Debugger Sub Agent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Debugger Sub Agent"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Podagent za otklanjanje pogrešaka"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "デバッグサブエージェント"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "调试子代理"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "除錯子代理"
+          }
+        }
+      }
+    },
+    "Find the CAUSE of a failure: reproduce it, shrink it to the smallest case, test one hypothesis at a time, and report the root cause with the evidence. Told not to fix." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Find the CAUSE of a failure: reproduce it, shrink it to the smallest case, test one hypothesis at a time, and report the root cause with the evidence. Told not to fix."
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pronalazi UZROK kvara: reproducira ga, svodi na najmanji slučaj, provjerava jednu hipotezu po jednu i izvještava o uzroku s dokazima. Uputa: ne ispravljaj."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不具合の原因を突き止める：再現し、最小のケースまで絞り、仮説を一つずつ検証して、根拠とともに根本原因を報告する。修正はしないよう指示済み。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找出故障的根因：复现它、缩小到最小案例、一次验证一个假设，并带着证据报告根因。已要求它不要动手修。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找出故障的根因：重現它、縮小到最小案例、一次驗證一個假設，並帶著證據回報根因。已要求它不要動手修。"
+          }
+        }
+      }
+    },
+    "Architect Sub Agent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Architect Sub Agent"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Podagent za arhitekturu"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アーキテクトサブエージェント"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "架构子代理"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "架構子代理"
+          }
+        }
+      }
+    },
+    "Decide how a change should be built before any code exists: read what is already there, weigh two or three options, and return a plan with its tradeoffs and unknowns." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Decide how a change should be built before any code exists: read what is already there, weigh two or three options, and return a plan with its tradeoffs and unknowns."
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Odlučuje kako promjenu treba izgraditi prije pisanja koda: čita postojeću implementaciju, odvagne dvije ili tri opcije i vraća plan s kompromisima i nepoznanicama."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コードを書く前に変更の設計を決める：既存の実装を読み、二〜三の案を比較し、トレードオフと不明点を添えた計画を返す。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在写任何代码之前先决定改动该怎么做：先读现有实现，权衡两三个方案，给出带取舍与未知项的计划。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在寫任何程式碼之前先決定改動該怎麼做：先讀現有實作，權衡兩三個方案，給出帶取捨與未知項的計畫。"
+          }
+        }
+      }
+    },
     "Generation stopped" : {
       "extractionState" : "manual",
       "localizations" : {

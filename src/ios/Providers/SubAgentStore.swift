@@ -104,7 +104,9 @@ final class SubAgentStore: ObservableObject {
         }
     }
 
-    var canAddSubAgent: Bool { subAgents.count < SubAgentLimits.maxCount }
+    /// The allowance is for CUSTOM rows: the built-ins do not consume it, so adding a
+    /// built-in can never take a slot away from an agent the user wrote.
+    var canAddSubAgent: Bool { subAgents.filter { !$0.isBuiltIn }.count < SubAgentLimits.maxCustom }
 
     // MARK: - Mutations
 
@@ -131,8 +133,10 @@ final class SubAgentStore: ObservableObject {
             incoming.sortOrder = list[idx].sortOrder
             list[idx] = incoming
         } else {
-            guard list.count < SubAgentLimits.maxCount else {
-                logger.warning("[SubAgents] refusing to add '\(incoming.name)' — roster already at \(SubAgentLimits.maxCount)")
+            // Counted over CUSTOM rows: the built-ins hold shipped slots and a new agent
+            // must not be refused because the roster happens to carry them.
+            guard list.filter { !$0.isBuiltIn }.count < SubAgentLimits.maxCustom else {
+                logger.warning("[SubAgents] refusing to add '\(incoming.name)' — custom roster already at \(SubAgentLimits.maxCustom)")
                 return
             }
             incoming.sortOrder = list.count

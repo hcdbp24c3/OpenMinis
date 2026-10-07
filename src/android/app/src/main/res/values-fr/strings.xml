@@ -1926,4 +1926,10 @@
     <string name="sub_agent_builtin_reviewer_description">Examine une modification ou un fichier sous l\'angle de la justesse, de la sécurité et de la couverture de tests, et rend des constats précis avec fichier et ligne. Consigne de ne pas corriger : le constat est le livrable.</string>
     <string name="sub_agent_builtin_tester_name">Sous-agent d\'exécution des tests</string>
     <string name="sub_agent_builtin_tester_description">Vérifie une modification en lançant la compilation et les tests du projet dans le bac à sable, puis indique la commande exacte, sa sortie et son code de retour — vert ou rouge, avec la preuve.</string>
+    <string name="sub_agent_builtin_researcher_name">Sous-agent de recherche</string>
+    <string name="sub_agent_builtin_researcher_description">Répond à une question à partir de sources EXTÉRIEURES : plusieurs requêtes, lecture des pages qui comptent, recoupement des affirmations, restitution avec les URL. Signale quand les sources se contredisent.</string>
+    <string name="sub_agent_builtin_debugger_name">Sous-agent de débogage</string>
+    <string name="sub_agent_builtin_debugger_description">Trouve la CAUSE d\'une panne : la reproduire, la réduire au plus petit cas, tester une hypothèse à la fois et rendre la cause racine avec les preuves. Consigne de ne pas corriger.</string>
+    <string name="sub_agent_builtin_architect_name">Sous-agent d\'architecture</string>
+    <string name="sub_agent_builtin_architect_description">Décide comment un changement doit être construit avant d\'écrire du code : lire l\'existant, peser deux ou trois options et rendre un plan avec ses compromis et ses inconnues.</string>
 </resources>

@@ -92,11 +92,13 @@ final class SubAgentDefinitionTests: XCTestCase {
     func testOverLimitRosterTruncatesToMaxCountWithoutThrowing() {
         let many = (1...25).map { custom("Agent \($0)", order: $0) }
         let out = SubAgentRoster.normalize(many)
-        XCTAssertEqual(out.count, SubAgentLimits.maxCount)
         XCTAssertEqual(out[0].id, SubAgentDefinition.builtInId, "the built-ins keep their slots")
-        XCTAssertEqual(out.count { !$0.isBuiltIn }, SubAgentLimits.maxCount - builtInCount,
-                       "the cap counts the whole roster the model reads, not user rows alone")
-        XCTAssertEqual(out.last?.name, "Agent \(SubAgentLimits.maxCount - builtInCount)",
+        // The allowance is the USER's: maxCustom custom rows regardless of how many
+        // built-ins this build ships. A single maxCount minus builtIns.count (what this
+        // used to be) silently dropped agents the user already had.
+        XCTAssertEqual(out.filter { !$0.isBuiltIn }.count, SubAgentLimits.maxCustom)
+        XCTAssertEqual(out.count, builtInCount + SubAgentLimits.maxCustom)
+        XCTAssertEqual(out.last?.name, "Agent \(SubAgentLimits.maxCustom)",
                        "the first custom entries by sortOrder survive")
     }
 
@@ -171,7 +173,7 @@ final class SubAgentDefinitionTests: XCTestCase {
         }.joined(separator: ",")
         let decoded = try JSONDecoder().decode([SubAgentDefinition].self, from: Data("[\(entries)]".utf8))
         let roster = SubAgentRoster.normalize(decoded)
-        XCTAssertEqual(roster.count, SubAgentLimits.maxCount)
+        XCTAssertEqual(roster.count, builtInCount + SubAgentLimits.maxCustom)
         XCTAssertEqual(roster[0].id, SubAgentDefinition.builtInId)
     }
 

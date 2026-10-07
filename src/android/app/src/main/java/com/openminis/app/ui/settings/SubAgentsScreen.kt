@@ -189,7 +189,9 @@ fun SubAgentsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                 }
             }
         }
-        if (roster.size < SubAgentLimits.MAX_COUNT) {
+        // The allowance is for CUSTOM rows: the built-ins do not consume it, so adding
+        // a built-in can never take a slot away from an agent the user wrote.
+        if (roster.count { !it.isBuiltIn } < SubAgentLimits.MAX_CUSTOM) {
             SettingsSection {
                 SettingsValueRow(
                     title = stringResource(R.string.sub_agents_add),
@@ -210,7 +212,7 @@ fun SubAgentsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
         } else {
             SettingsSection {
                 Text(
-                    stringResource(R.string.sub_agents_limit_reached, SubAgentLimits.MAX_COUNT),
+                    stringResource(R.string.sub_agents_limit_reached, SubAgentLimits.MAX_CUSTOM),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth().padding(16.dp),

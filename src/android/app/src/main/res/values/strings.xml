@@ -2422,4 +2422,10 @@
     <string name="sub_agent_builtin_reviewer_description">Review a change or a file for correctness, security and test coverage, and report concrete findings with the file and line. Told not to fix: the finding is the deliverable.</string>
     <string name="sub_agent_builtin_tester_name">Test Runner Sub Agent</string>
     <string name="sub_agent_builtin_tester_description">Verify a change by running the project\'s build and tests in the sandbox, then report the exact command, its output and its exit status — green or red, with the evidence.</string>
+    <string name="sub_agent_builtin_researcher_name">Research Sub Agent</string>
+    <string name="sub_agent_builtin_researcher_description">Answer a question from OUTSIDE sources: run several search queries, read the pages that matter, cross-check what they claim, and report it with the URLs. Says when sources disagree.</string>
+    <string name="sub_agent_builtin_debugger_name">Debugger Sub Agent</string>
+    <string name="sub_agent_builtin_debugger_description">Find the CAUSE of a failure: reproduce it, shrink it to the smallest case, test one hypothesis at a time, and report the root cause with the evidence. Told not to fix.</string>
+    <string name="sub_agent_builtin_architect_name">Architect Sub Agent</string>
+    <string name="sub_agent_builtin_architect_description">Decide how a change should be built before any code exists: read what is already there, weigh two or three options, and return a plan with its tradeoffs and unknowns.</string>
 </resources>

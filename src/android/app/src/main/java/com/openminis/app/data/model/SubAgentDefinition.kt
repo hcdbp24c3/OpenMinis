@@ -19,8 +19,28 @@ import java.util.UUID
  * three cannot drift apart.
  */
 object SubAgentLimits {
-    /** Including the built-in one. */
-    const val MAX_COUNT = 10
+    /**
+     * [T-sub-agent-builtin-roster] Custom (user-created) agents a roster may hold.
+     *
+     * This is the number that must NOT move when built-ins are added. It replaces a
+     * single `MAX_COUNT = 10` that was written when exactly one built-in shipped, and
+     * which the extra built-ins then silently ate into: the bound was applied to
+     * `MAX_COUNT - builtIns.size`, so a user who had nine custom agents before an
+     * upgrade would have lost six of them to a roster rule they never touched. A
+     * roster that was legal before an upgrade stays legal after it.
+     */
+    const val MAX_CUSTOM = 9
+
+    /**
+     * Ceiling on the whole roster the model reads (built-ins + [MAX_CUSTOM]).
+     *
+     * Built-ins DO count towards the prompt: the roster is injected every turn, so the
+     * absolute size of it is the thing actually being bounded here. This ceiling exists
+     * for a future build that ships many more built-ins — it caps that growth without
+     * ever touching the user's own allowance.
+     */
+    const val MAX_TOTAL = 16
+
     const val NAME_MAX_LENGTH = 40
 
     /** The only free text that reaches the main conversation. */
@@ -136,6 +156,21 @@ data class SubAgentDefinition(
             } else {
                 com.openminis.app.R.string.sub_agent_builtin_reviewer_name
             }
+            RESEARCHER_NAME -> if (description) {
+                com.openminis.app.R.string.sub_agent_builtin_researcher_description
+            } else {
+                com.openminis.app.R.string.sub_agent_builtin_researcher_name
+            }
+            DEBUGGER_NAME -> if (description) {
+                com.openminis.app.R.string.sub_agent_builtin_debugger_description
+            } else {
+                com.openminis.app.R.string.sub_agent_builtin_debugger_name
+            }
+            ARCHITECT_NAME -> if (description) {
+                com.openminis.app.R.string.sub_agent_builtin_architect_description
+            } else {
+                com.openminis.app.R.string.sub_agent_builtin_architect_name
+            }
             TESTER_NAME -> if (description) {
                 com.openminis.app.R.string.sub_agent_builtin_tester_description
             } else {
@@ -222,10 +257,111 @@ data class SubAgentDefinition(
                 "command, its output and its exit status — green or red, with the evidence."
 
         /**
+         * [T-sub-agent-builtin-roster] Three more built-ins, taken from what the
+         * published sub-agent catalogs converge on (VoltAgent's awesome-claude-code-
+         * subagents, jurabek/sub-agents): the roles those collections list most and
+         * that are genuinely distinct shapes of work rather than domains.
+         *
+         *  - research (their `search-specialist`): answer from OUTSIDE sources, with
+         *    URLs and cross-checking. [SCOUT_ID] maps a codebase; this one goes out to
+         *    the web and is accountable for its sources.
+         *  - debug (their `debugger`): find the cause of a failure that already
+         *    happened. [TESTER_ID] verifies a change that already exists; this one
+         *    establishes a fact that does not — what is actually broken and why.
+         *  - architect (their `architect-review`): decide the shape of a change before
+         *    code is written. [REVIEWER_ID] judges code that exists; this one judges a
+         *    decision that does not.
+         *
+         * Their prompts are 5-10k characters of capability lists. These are deliberately
+         * not: the value is the PROCESS and the output CONTRACT, and a child session
+         * that is handed a wall of buzzwords spends its context on the wall. Each brief
+         * below is one screen, names the tools this app actually has, and states what
+         * the child must hand back.
+         */
+        const val RESEARCHER_ID = "builtin.researcher"
+        const val RESEARCHER_NAME = "Research Sub Agent"
+        const val RESEARCHER_DESCRIPTION =
+            "Answer a question from OUTSIDE sources: run several search queries, read the pages that matter, " +
+                "cross-check what they claim, and report it with the URLs. Says when sources disagree."
+
+        const val DEBUGGER_ID = "builtin.debugger"
+        const val DEBUGGER_NAME = "Debugger Sub Agent"
+        const val DEBUGGER_DESCRIPTION =
+            "Find the CAUSE of a failure: reproduce it, shrink it to the smallest case, test one hypothesis " +
+                "at a time, and report the root cause with the evidence. Told not to fix."
+
+        const val ARCHITECT_ID = "builtin.architect"
+        const val ARCHITECT_NAME = "Architect Sub Agent"
+        const val ARCHITECT_DESCRIPTION =
+            "Decide how a change should be built before any code exists: read what is already there, weigh " +
+                "two or three options, and return a plan with its tradeoffs and unknowns."
+
+        /** The research brief: process, rules, and what must come back. */
+        private const val RESEARCHER_INSTRUCTIONS = """You research a question from sources OUTSIDE this machine. The parent keeps your conclusion and discards your reading, so the conclusion has to stand on its own.
+
+Method
+- Turn the question into 3-5 queries instead of one: quote a phrase for exact wording, add a negative term to drop the noise, and try a variant in the language the best source is likely written in.
+- web_search first for breadth. Then web_fetch the two or three results that look authoritative: primary sources (official docs, specs, release notes, the project's own repository) beat aggregators and SEO pages.
+- Use browser_use only when a page needs JavaScript or a click before its content exists, and repo_digest when the answer lives in source rather than prose.
+- A claim you only saw in a search-result summary is not evidence. Read the page.
+
+Rules
+- Quote the exact sentence for anything load-bearing, and give its URL.
+- When sources disagree, say so, say which you find more credible, and why. Do not average them into a confident middle.
+- Date what you cite. "Current" advice from a 2019 page is a different claim from a 2025 one; say which you have.
+- Never invent a URL, a version number, or a quote. If you could not verify something, mark it unverified in one line rather than dropping the gap.
+- You do not modify files or the repository, and nothing you do changes the system. If the finding implies a change, describe it; do not attempt it.
+
+Report
+1. The answer in a short paragraph, then the detail that supports it.
+2. Findings as a list: claim -> evidence -> source URL.
+3. What you could not establish, and what you would search next.
+4. The queries you used, listed compactly."""
+
+        /** The debug brief. */
+        private const val DEBUGGER_INSTRUCTIONS = """You find the cause of something that is broken. The parent gets your conclusion, not your session, so a precise cause beats a long transcript.
+
+Method
+- Establish the failure as a FACT first: the exact command, its exact output, its exit status. A failure you cannot reproduce is a hypothesis, not a finding, and you must say which one you have.
+- Shrink it: fewer inputs, fewer flags, a smaller file, a direct call instead of the whole pipeline. The smallest reproducing case is usually where the cause becomes obvious.
+- Read the error rather than skimming it: the frame that raised, the value it says was wrong, and the state (null, empty, stale, wrong type) name the suspect.
+- Check what changed: edits in the working tree, a version bump, a config value. A failure that appeared with a change is nearly always explained by that change.
+- Form ONE hypothesis and test it: a print, an assertion, a one-line probe, a minimal script. Read the code path the failure actually takes, not the one you assume it takes. Instrumenting many places at once means you will not know which line mattered.
+- Do not stop at the first plausible explanation. Name the mechanism — why this input produces this wrong output. "Probably a race" is not a cause.
+
+Reporting
+1. Root cause in one or two sentences, naming the file and line.
+2. The evidence: the reproducing command and its output, plus the probe that proved it.
+3. The smallest case that still fails, and the boundary where it stops.
+4. Anything you changed while investigating, so the parent can revert it — leave the tree clean.
+5. The fix you would make, described and not applied. The finding is the deliverable.
+6. If you could not isolate it: what you ruled OUT, and the next experiment you would run."""
+
+        /** The architect brief. */
+        private const val ARCHITECT_INSTRUCTIONS = """You decide HOW something should be built or changed, before any code is written. The parent implements from your plan, so it has to be specific enough to follow and honest about what you do not know.
+
+Method
+- Read the code that already exists. A plan for a system you have not read is a guess about a system that may already solve the problem — find the existing pattern and extend it rather than inventing a parallel one.
+- Name the constraints you are planning against: language and version, platform, the size of the change, what must keep working, and what the project already depends on.
+- Give two or three options when the choice is real. For each: what it costs, what it makes easy, what it makes hard, and what it breaks. One option presented as obvious is usually a decision nobody examined.
+- Recommend one and say why the others lost. Prefer the boring option: fewer moving parts, no new dependency, steps that can be undone.
+- State the assumptions each part rests on, so the parent can check them instead of discovering them at the end.
+- Size the blast radius: every file and caller the change touches, and what must be updated with it (tests, docs, serialized formats, migrations).
+
+Reporting
+1. The recommendation in a short paragraph.
+2. The plan as ordered steps, each small enough to verify on its own.
+3. Tradeoffs, per option: cost, gain, risk.
+4. Assumptions and unknowns.
+5. What would make you change the recommendation."""
+
+        /**
          * Every built-in id, in roster order. The order is the disclosure order, and
          * the first entry is what a blank agent name resolves to.
          */
-        val BUILT_IN_IDS = listOf(BUILT_IN_ID, SCOUT_ID, REVIEWER_ID, TESTER_ID)
+        val BUILT_IN_IDS = listOf(
+            BUILT_IN_ID, SCOUT_ID, REVIEWER_ID, TESTER_ID, RESEARCHER_ID, DEBUGGER_ID, ARCHITECT_ID,
+        )
 
         /** Whether [id] belongs to a built-in this build knows. */
         fun isBuiltInId(id: String): Boolean = id in BUILT_IN_IDS
@@ -274,6 +410,30 @@ data class SubAgentDefinition(
                 description = TESTER_DESCRIPTION,
                 isBuiltIn = true,
                 sortOrder = 3,
+            ),
+            SubAgentDefinition(
+                id = RESEARCHER_ID,
+                name = RESEARCHER_NAME,
+                description = RESEARCHER_DESCRIPTION,
+                instructions = RESEARCHER_INSTRUCTIONS,
+                isBuiltIn = true,
+                sortOrder = 4,
+            ),
+            SubAgentDefinition(
+                id = DEBUGGER_ID,
+                name = DEBUGGER_NAME,
+                description = DEBUGGER_DESCRIPTION,
+                instructions = DEBUGGER_INSTRUCTIONS,
+                isBuiltIn = true,
+                sortOrder = 5,
+            ),
+            SubAgentDefinition(
+                id = ARCHITECT_ID,
+                name = ARCHITECT_NAME,
+                description = ARCHITECT_DESCRIPTION,
+                instructions = ARCHITECT_INSTRUCTIONS,
+                isBuiltIn = true,
+                sortOrder = 6,
             ),
         )
     }
@@ -338,8 +498,12 @@ object SubAgentRoster {
             list.filterNot { SubAgentDefinition.isBuiltInId(it.id) }
         custom = custom.sortedWith(compareBy({ it.sortOrder }, { it.id }))
 
-        // Drop anything past the bound (the built-ins already hold their slots).
-        val allowedCustom = maxOf(0, SubAgentLimits.MAX_COUNT - builtIns.size)
+        // Drop anything past the CUSTOM allowance, which the built-ins do not eat into
+        // (see SubAgentLimits.MAX_CUSTOM) — only the total roster is capped.
+        val allowedCustom = minOf(
+            SubAgentLimits.MAX_CUSTOM,
+            maxOf(0, SubAgentLimits.MAX_TOTAL - builtIns.size),
+        )
         if (custom.size > allowedCustom) {
             val dropped = custom.drop(allowedCustom).map { it.name }
             log?.invoke(

@@ -175,14 +175,52 @@ class SubAgentDefinitionTest {
     // ── Bounds ──────────────────────────────────────────────────────────────
 
     @Test
-    fun `the roster is capped at the maximum count including the built-in`() {
+    fun `the custom allowance is capped and the built-ins do not eat into it`() {
         val many = (1..20).map { custom("id$it", "Agent $it", sortOrder = it) }
         val out = SubAgentRoster.normalize(many)
-        assertEquals(SubAgentLimits.MAX_COUNT, out.size)
         assertEquals(SubAgentDefinition.BUILT_IN_ID, out[0].id)
-        // The built-ins hold their slots: the bound is on the roster the model reads,
-        // not on user rows alone.
-        assertEquals(SubAgentLimits.MAX_COUNT - builtInCount, out.count { !it.isBuiltIn })
+        // The allowance is the USER's: MAX_CUSTOM custom rows regardless of how many
+        // built-ins this build ships. A single MAX_COUNT minus builtIns.size (what this
+        // used to be) would have silently dropped agents the user already had every time
+        // a built-in was added.
+        assertEquals(SubAgentLimits.MAX_CUSTOM, out.count { !it.isBuiltIn })
+        assertEquals(builtInCount + SubAgentLimits.MAX_CUSTOM, out.size)
+    }
+
+    @Test
+    fun `a roster filled to the old allowance survives an upgrade that ships more built-ins`() {
+        // The compatibility rule, stated as a roster: nine custom agents — legal before
+        // any of this — must still be nine after normalize, with the built-ins added in
+        // front of them rather than in place of them.
+        val nine = (1..9).map { custom("id$it", "Agent $it", sortOrder = it) }
+        val out = SubAgentRoster.normalize(nine)
+        assertEquals(
+            (1..9).map { "Agent $it" },
+            out.filter { !it.isBuiltIn }.map { it.name },
+        )
+        assertEquals(SubAgentDefinition.BUILT_IN_IDS, out.take(builtInCount).map { it.id })
+    }
+
+    @Test
+    fun `the briefs shipped with the role built-ins are real and inside the bound`() {
+        // The value of a role built-in is the process + output contract it hands the
+        // child session. A build that ships the NAME without the brief would advertise
+        // "Research Sub Agent" and deliver the same generic loop as any other.
+        for (id in listOf(
+            SubAgentDefinition.RESEARCHER_ID,
+            SubAgentDefinition.DEBUGGER_ID,
+            SubAgentDefinition.ARCHITECT_ID,
+        )) {
+            val spec = SubAgentDefinition.makeBuiltIns().first { it.id == id }
+            assertTrue("$id must ship a brief", spec.instructions.length > 400)
+            assertTrue("$id must fit the bound", spec.instructions.length <= SubAgentLimits.INSTRUCTIONS_MAX_LENGTH)
+        }
+        // The three older built-ins stay instruction-free on purpose: the user's own
+        // wording is not second-guessed by a default they did not write.
+        for (id in listOf(SubAgentDefinition.BUILT_IN_ID, SubAgentDefinition.SCOUT_ID, SubAgentDefinition.TESTER_ID)) {
+            val spec = SubAgentDefinition.makeBuiltIns().first { it.id == id }
+            assertEquals("$id ships no default brief", "", spec.instructions)
+        }
     }
 
     @Test
