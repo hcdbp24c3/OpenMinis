@@ -963,6 +963,15 @@ class SelectionController {
      * tail anchors. Returns null when there's no cache, no usable anchors, or
      * the selected span contains no extra (non-shard) content beyond the
      * shard-walk text — in which case the caller keeps the exact shard walk.
+     *
+     * [T-android-selection-copy-scope] The anchors are located as the TIGHTEST
+     * window in the markdown that holds them in order, not at their first
+     * occurrence. A report repeats its own vocabulary — "Kết quả:" opens the
+     * summary AND appears inside the paragraph the user selected further down —
+     * so a first-occurrence `indexOf` started the slice at the earlier
+     * look-alike and, because a table inside the slice made the splice win over
+     * the exact walk, the clipboard got everything from that point to the end
+     * of the reply instead of the selection.
      */
     private fun spliceNonShardSpan(
         first: TextPosition,
@@ -984,11 +993,9 @@ class SelectionController {
         val tailAnchor = anchorFor(tailSel, fromStart = false)
         if (headAnchor.isEmpty() || tailAnchor.isEmpty()) return null
 
-        val startIdx = md.indexOf(headAnchor)
-        if (startIdx < 0) return null
-        val tailIdx = md.indexOf(tailAnchor, startIdx + headAnchor.length)
-        if (tailIdx < 0) return null
-        val endIdx = tailIdx + tailAnchor.length
+        val window = tightestWindow(md, headAnchor, tailAnchor, walk.length) ?: return null
+        val startIdx = window.first
+        val endIdx = window.second
         if (endIdx <= startIdx) return null
 
         val slice = md.substring(startIdx, endIdx)
@@ -1002,6 +1009,60 @@ class SelectionController {
         // markdown slice there would re-introduce `#`, `**`, etc. the user
         // didn't select as rendered text.
         return if (sliceCrossesNonShardBlock(slice)) slice else null
+    }
+
+    /**
+     * [T-android-selection-copy-scope] The tightest `[start, end)` in [md] that
+     * contains [headAnchor] followed by [tailAnchor].
+     *
+     * The anchors are short runs of rendered text, so a message can contain
+     * more than one of each; the selection is the narrowest span that has one
+     * of each in the right order. Requiring the span to be at least as long as
+     * the rendered [walk] (minus a little slack for the markdown markers the
+     * walk drops) rejects a coincidental pair of look-alikes that sit closer
+     * together than the selection could be. Returns null when no pair qualifies
+     * — the caller then keeps the exact shard walk, which is bounded correctly
+     * and merely misses the non-shard block.
+     */
+    private fun tightestWindow(md: String, headAnchor: String, tailAnchor: String, walkLength: Int): Pair<Int, Int>? {
+        val heads = occurrences(md, headAnchor)
+        if (heads.isEmpty()) return null
+        val tails = occurrences(md, tailAnchor)
+        if (tails.isEmpty()) return null
+
+        val candidates = ArrayList<Pair<Int, Int>>(heads.size * tails.size)
+        for (h in heads) {
+            for (t in tails) {
+                val end = t + tailAnchor.length
+                // The tail must start after the head: an overlapping pair is not
+                // a selection, it is one occurrence of one anchor.
+                if (t <= h + headAnchor.length) continue
+                candidates.add(h to end)
+            }
+        }
+        if (candidates.isEmpty()) return null
+
+        // Shortest window wins. Slice length is walk length + the markdown
+        // markers and blank lines the rendered walk dropped + any non-shard
+        // block inside — never shorter by more than that slack, which is what
+        // makes this filter safe to apply first.
+        val slack = 40
+        val minLength = (walkLength - slack).coerceAtLeast(1)
+        val eligible = candidates.filter { it.second - it.first >= minLength }
+        return (eligible.ifEmpty { candidates }).minByOrNull { it.second - it.first }
+    }
+
+    /** Every index at which [needle] occurs in [haystack], in order. */
+    private fun occurrences(haystack: String, needle: String): List<Int> {
+        if (needle.isEmpty()) return emptyList()
+        val out = ArrayList<Int>(2)
+        var from = 0
+        while (true) {
+            val at = haystack.indexOf(needle, from)
+            if (at < 0) return out
+            out.add(at)
+            from = at + 1
+        }
     }
 
     /**
