@@ -2708,22 +2708,27 @@ class ChatViewModel(
     val memoryEnabled: StateFlow<Boolean> = _memoryEnabled.asStateFlow()
 
     /**
-     * [T-android-usage-capsule-style] Message ids whose token-usage capsule is
-     * revealed. Default empty: the capsule is an easter egg, not a permanent
-     * footer — iOS keeps it hidden until the user taps the blank area at the
-     * bottom of the reply, and taps again to put it away.
+     * [T-android-usage-capsule-style] Message ids whose token-usage capsule the user
+     * DISMISSED.
+     *
+     * The capsule used to be an easter egg: hidden until a tap on the blank area under
+     * a reply, and the set recorded ids that had been REVEALED. It is now the footer the
+     * numbers deserve to be — `ctx:47.0k in:818 out:735 cache:46.2k 11:55` is what tells
+     * you whether the next turn is near the limit — so the default is visible and the
+     * set records the messages a tap has put away. Same gesture, inverted default — and iOS
+     * flipped its own default in the same change so the two platforms read the same way.
      *
      * Held here rather than in a composable because the flat renderer emits
      * the capsule as its own list item, with no shared parent to remember it
      * in. Keying by message id also means a row scrolled out and back keeps
      * whatever the user chose. Session-scoped, so it resets with the ViewModel.
      */
-    internal val _revealedUsageIds = MutableStateFlow<Set<String>>(emptySet())
-    val revealedUsageIds: StateFlow<Set<String>> = _revealedUsageIds.asStateFlow()
+    internal val _hiddenUsageIds = MutableStateFlow<Set<String>>(emptySet())
+    val hiddenUsageIds: StateFlow<Set<String>> = _hiddenUsageIds.asStateFlow()
 
     fun toggleUsageCapsule(messageId: String) {
-        val cur = _revealedUsageIds.value
-        _revealedUsageIds.value = if (messageId in cur) cur - messageId else cur + messageId
+        val cur = _hiddenUsageIds.value
+        _hiddenUsageIds.value = if (messageId in cur) cur - messageId else cur + messageId
     }
 
     internal val _thinkingLevel = MutableStateFlow(ThinkingLevel.OFF)

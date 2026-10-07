@@ -1930,4 +1930,5 @@
     <string name="sub_agent_builtin_debugger_description">실패의 원인을 찾습니다. 재현하고, 가장 작은 사례로 줄이고, 가설을 하나씩 검증해 근거와 함께 근본 원인을 보고합니다. 고치지 말라고 지시되어 있습니다.</string>
     <string name="sub_agent_builtin_architect_name">아키텍트 서브 에이전트</string>
     <string name="sub_agent_builtin_architect_description">코드를 쓰기 전에 변경을 어떻게 만들지 결정합니다. 기존 구현을 읽고, 두세 가지 안을 저울질해 장단점과 미지수를 담은 계획을 돌려줍니다.</string>
+    <string name="chat_copy_all_short">전체</string>
 </resources>

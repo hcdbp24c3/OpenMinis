@@ -2180,4 +2180,5 @@
     <string name="sub_agent_builtin_debugger_description">找出故障的根因：重現它、縮小到最小案例、一次驗證一個假設，並帶著證據回報根因。已要求它不要動手修。</string>
     <string name="sub_agent_builtin_architect_name">架構子代理</string>
     <string name="sub_agent_builtin_architect_description">在寫任何程式碼之前先決定改動該怎麼做：先讀現有實作，權衡兩三個方案，給出帶取捨與未知項的計畫。</string>
+    <string name="chat_copy_all_short">全部</string>
 </resources>

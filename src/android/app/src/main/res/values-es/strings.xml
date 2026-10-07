@@ -1932,4 +1932,5 @@
     <string name="sub_agent_builtin_debugger_description">Encuentra la CAUSA de un fallo: reprodúcelo, redúcelo al caso mínimo, prueba una hipótesis a la vez y reporta la causa raíz con la evidencia. Se le indica que no corrija.</string>
     <string name="sub_agent_builtin_architect_name">Subagente de arquitectura</string>
     <string name="sub_agent_builtin_architect_description">Decide cómo debe construirse un cambio antes de escribir código: lee lo que ya existe, sopesa dos o tres opciones y devuelve un plan con sus ventajas, costes e incógnitas.</string>
+    <string name="chat_copy_all_short">TODO</string>
 </resources>

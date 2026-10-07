@@ -1180,9 +1180,13 @@ final class CellStateBridgeV2: ObservableObject {
     @Published var toolSnapshots: [ToolSnapshotItem] = []
     /// Tool detail sheet — owned by footer, triggered by block cells.
     @Published var detailBlock: AssistantBlock?
-    /// Token usage visibility — toggled by double-tap on block cells, read by footer.
-    @Published var showUsage: Bool = false
-    @Published var usageContentVisible: Bool = false
+    /// Token usage visibility — read by the footer, hidden again by a double-tap on block
+    /// cells. Starts VISIBLE: `ctx:47.0k in:818 out:735 cache:46.2k 11:55` is the number that
+    /// tells you whether the next turn is near the limit, and a user who never discovers the
+    /// double-tap never sees it. Android made the same change ([T-android-usage-capsule-style],
+    /// `hiddenUsageIds`) so the two platforms read the same way.
+    @Published var showUsage: Bool = true
+    @Published var usageContentVisible: Bool = true
     /// Compact summary — presented from overlay outside cell tree for animation.
     var onShowCompactSummary: ((String) -> Void)?
 }

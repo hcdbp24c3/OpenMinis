@@ -1092,9 +1092,17 @@ internal fun SwipeToSendHint(
  * the hot path of the message list.
  */
 internal class ChatMessageAction(
-    val icon: ImageVector,
+    /**
+     * Optional: with [labelText] set, the action renders as a short TEXT chip instead.
+     * Two identical copy glyphs side by side were indistinguishable under a reply, and a
+     * 17dp icon has no room to say "this one takes the whole turn" — "ALL" does (iOS
+     * solves the same problem with a text menu entry).
+     */
+    val icon: ImageVector? = null,
     val label: String,
     val tint: Color = Color.Unspecified,
+    /** Short chip text, e.g. "ALL". Takes precedence over [icon]. */
+    val labelText: String? = null,
     val onClick: () -> Unit,
 )
 
@@ -1106,6 +1114,10 @@ internal class ChatMessageAction(
  * would add ~100dp to the transcript. 30dp circles with 17dp glyphs keep the row the
  * height of one text line, and the same actions remain in the long-press menu, which
  * is where a thumb-sized target belongs.
+ *
+ * An action renders as a 17dp glyph, or as a short text chip when it carries
+ * [ChatMessageAction.labelText] — three or four characters ("ALL") say more than a second
+ * copy glyph that looks like the first one.
  *
  * Renders nothing when [actions] is empty, so a streaming turn or a message with no
  * applicable action leaves no gap.
@@ -1123,6 +1135,11 @@ internal fun MessageActionRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         actions.forEach { action ->
+            val tint = if (action.tint == Color.Unspecified) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                action.tint
+            }
             Box(
                 modifier = Modifier
                     .size(30.dp)
@@ -1130,12 +1147,26 @@ internal fun MessageActionRow(
                     .clickable(onClick = action.onClick),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    imageVector = action.icon,
-                    contentDescription = action.label,
-                    tint = if (action.tint == Color.Unspecified) MaterialTheme.colorScheme.onSurfaceVariant else action.tint,
-                    modifier = Modifier.size(17.dp),
-                )
+                val text = action.labelText
+                if (text != null) {
+                    Text(
+                        text = text,
+                        // Bounded by the 30dp circle: three or four characters at this size
+                        // are the most the row can carry without changing its height.
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold,
+                        color = tint,
+                        maxLines = 1,
+                    )
+                } else if (action.icon != null) {
+                    Icon(
+                        imageVector = action.icon,
+                        contentDescription = action.label,
+                        tint = tint,
+                        modifier = Modifier.size(17.dp),
+                    )
+                }
             }
         }
     }

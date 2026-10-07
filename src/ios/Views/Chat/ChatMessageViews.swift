@@ -240,6 +240,16 @@ struct ChatMessageRow: View {
     /// Lifted out of ToolCapsuleView so ForEach item changes don't reset it.
     @State private var detailBlock: AssistantBlock?
 
+    /// The LAST text block, for "Copy Answer" — an agent turn is narration, tool calls, then
+    /// the answer, and the answer is what a copy under the reply should hand back. Android
+    /// carries the same rule (`lastTextBlockPerMessage`) and its row shows it as the plain
+    /// "Copy" action, with the whole turn behind an "ALL" chip beside it.
+    private var finalAnswerText: String {
+        message.blocks
+            .last { if case .text = $0.kind { return true }; return false }?
+            .content ?? ""
+    }
+
     /// All text block contents joined, for "Copy All".
     private var fullReplyText: String {
         message.blocks
@@ -644,6 +654,11 @@ struct ChatMessageRow: View {
                         hasCompact: onCompact != nil,
                         isActive: isActiveMessage
                     )) {
+                        Button {
+                            UIPasteboard.general.string = finalAnswerText
+                        } label: {
+                            Label(AppLocalized("Copy Answer"), systemImage: "text.alignleft")
+                        }
                         Button {
                             UIPasteboard.general.string = fullReplyText
                         } label: {

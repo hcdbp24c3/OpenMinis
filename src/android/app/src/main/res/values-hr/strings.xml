@@ -2155,4 +2155,5 @@
     <string name="sub_agent_builtin_debugger_description">Pronalazi UZROK kvara: reproducira ga, svodi na najmanji slučaj, provjerava jednu hipotezu po jednu i izvještava o uzroku s dokazima. Uputa: ne ispravljaj.</string>
     <string name="sub_agent_builtin_architect_name">Podagent za arhitekturu</string>
     <string name="sub_agent_builtin_architect_description">Odlučuje kako promjenu treba izgraditi prije pisanja koda: čita postojeću implementaciju, odvagne dvije ili tri opcije i vraća plan s kompromisima i nepoznanicama.</string>
+    <string name="chat_copy_all_short">SVE</string>
 </resources>

@@ -601,7 +601,7 @@ fun ChatScreen(
     val messages by viewModel.uiMessages.collectAsState()
     // [T-android-usage-capsule-style] Which replies currently show their usage
     // capsule. Empty by default — it is revealed by tapping the reply's tail.
-    val revealedUsageIds by viewModel.revealedUsageIds.collectAsState()
+    val hiddenUsageIds by viewModel.hiddenUsageIds.collectAsState()
     val hasOlderMessages by viewModel.hasOlderMessages.collectAsState()
     val isStreaming by viewModel.isStreaming.collectAsState()
     val canResume by viewModel.canResume.collectAsState()
@@ -4764,14 +4764,15 @@ fun ChatScreen(
                             is FlatChatItem.AssistantTyping -> TypingIndicator()
                             // [T-android-usage-capsule-time] Same composable the
                             // classic renderer uses, so the two paths cannot drift.
-                            // [T-android-usage-capsule-style] Hidden until the
-                            // user taps the blank strip at the end of the reply,
-                            // matching iOS. The item still occupies its slot so
-                            // there is something to tap; only the capsule inside
-                            // it fades in and out.
+                            // [T-android-usage-capsule-style] Shown by default (see
+                            // hiddenUsageIds); the item keeps its slot so the strip
+                            // under it stays tappable to dismiss it.
                             is FlatChatItem.AssistantUsage -> {
                                 val msgId = originalMessageId(item.messageId)
-                                val shown = msgId in revealedUsageIds
+                                // [T-android-usage-capsule-style] Visible by default:
+                                // the numbers are the footer, and a tap on the blank
+                                // strip (or on the capsule) puts them away.
+                                val shown = item.usage != null && msgId !in hiddenUsageIds
                                 Column(modifier = Modifier.fillMaxWidth()) {
                                 // [T-android-message-actions] The capsule is optional
                                 // (a cancelled turn has no usage to report) but the row
@@ -4866,8 +4867,11 @@ fun ChatScreen(
                                         if (multiBlock) {
                                             add(
                                                 ChatMessageAction(
-                                                    Icons.Default.ContentCopy,
-                                                    stringResource(R.string.chat_longpress_copy_all),
+                                                    // A text chip, not a second copy glyph: at
+                                                    // 17dp the two icons were indistinguishable,
+                                                    // and "ALL" says which scope this one takes.
+                                                    label = stringResource(R.string.chat_longpress_copy_all),
+                                                    labelText = stringResource(R.string.chat_copy_all_short),
                                                     onClick = { copyMessageText(turnText) },
                                                 ),
                                             )

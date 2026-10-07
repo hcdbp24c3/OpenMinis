@@ -1969,4 +1969,5 @@
     <string name="sub_agent_builtin_debugger_description">不具合の原因を突き止める：再現し、最小のケースまで絞り、仮説を一つずつ検証して、根拠とともに根本原因を報告する。修正はしないよう指示済み。</string>
     <string name="sub_agent_builtin_architect_name">アーキテクトサブエージェント</string>
     <string name="sub_agent_builtin_architect_description">コードを書く前に変更の設計を決める：既存の実装を読み、二〜三の案を比較し、トレードオフと不明点を添えた計画を返す。</string>
+    <string name="chat_copy_all_short">全て</string>
 </resources>

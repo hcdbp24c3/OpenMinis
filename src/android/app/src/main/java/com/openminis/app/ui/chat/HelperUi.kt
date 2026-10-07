@@ -1423,7 +1423,7 @@ internal fun HelperTranscript(
     // permanent stats line under every reply while the main chat kept it
     // hidden — the same easter egg behaving differently depending on which
     // screen you were on.
-    val revealedUsage by vm.revealedUsageIds.collectAsState()
+    val hiddenUsage by vm.hiddenUsageIds.collectAsState()
     val items = remember(messages, streaming) {
         val merged = if (streaming.isEmpty()) messages else mergeStreamingOverlay(messages, streaming)
         buildFlatChatItems(merged)
@@ -1481,7 +1481,7 @@ internal fun HelperTranscript(
                         // but a turn that reported no usage has no capsule to show.
                         item.usage?.let { usage ->
                         androidx.compose.animation.AnimatedVisibility(
-                            visible = msgId in revealedUsage,
+                            visible = item.usage != null && msgId !in hiddenUsage,
                             enter = androidx.compose.animation.fadeIn(),
                             exit = androidx.compose.animation.fadeOut(),
                         ) {

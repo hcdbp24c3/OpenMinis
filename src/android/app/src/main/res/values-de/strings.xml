@@ -1932,4 +1932,5 @@
     <string name="sub_agent_builtin_debugger_description">Findet die URSACHE eines Fehlers: reproduzieren, auf den kleinsten Fall verkleinern, eine Hypothese nach der anderen prüfen und die Ursache mit Beleg melden. Angewiesen, nichts zu reparieren.</string>
     <string name="sub_agent_builtin_architect_name">Architektur-Subagent</string>
     <string name="sub_agent_builtin_architect_description">Entscheidet vor dem Code, wie eine Änderung gebaut wird: bestehende Umsetzung lesen, zwei oder drei Optionen abwägen und einen Plan mit Abwägungen und Unbekanntem liefern.</string>
+    <string name="chat_copy_all_short">ALLE</string>
 </resources>
