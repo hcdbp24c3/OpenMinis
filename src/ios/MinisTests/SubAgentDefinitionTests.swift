@@ -47,6 +47,27 @@ final class SubAgentDefinitionTests: XCTestCase {
         XCTAssertEqual(out.last?.name, "Translator")
     }
 
+    /// Every built-in ships a brief. An empty one makes the built-in only a NAME: the
+    /// child gets the same generic loop whichever one is picked, so "Recon Sub Agent" and
+    /// "General Sub Agent" behave identically. The brief is what makes the name true, it
+    /// costs the main conversation nothing, and it stays editable.
+    func testEveryBuiltInShipsABrief() {
+        for spec in SubAgentDefinition.makeBuiltIns() {
+            XCTAssertGreaterThan(spec.instructions.count, 400, "\(spec.id) must ship a brief")
+            XCTAssertLessThanOrEqual(spec.instructions.count, SubAgentLimits.instructionsMaxLength,
+                                     "\(spec.id) must fit the bound")
+        }
+    }
+
+    /// A brief is a default, not a lock: a stored one survives normalize.
+    func testABuiltInBriefIsEditable() {
+        var mine = SubAgentDefinition.makeBuiltIns().first { $0.id == SubAgentDefinition.testerId }!
+        mine.instructions = "run only the failing class, then report the count"
+        let out = SubAgentRoster.normalize([mine])
+        XCTAssertEqual(out.first { $0.id == SubAgentDefinition.testerId }?.instructions,
+                       "run only the failing class, then report the count")
+    }
+
     /// The split the roster depends on: name/description are the model's contract
     /// (canonical for a built-in), everything else on the row is the user's.
     func testBuiltInKeepsUserFieldsButNotUserWording() {

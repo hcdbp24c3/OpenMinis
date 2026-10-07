@@ -215,12 +215,27 @@ class SubAgentDefinitionTest {
             assertTrue("$id must ship a brief", spec.instructions.length > 400)
             assertTrue("$id must fit the bound", spec.instructions.length <= SubAgentLimits.INSTRUCTIONS_MAX_LENGTH)
         }
-        // The three older built-ins stay instruction-free on purpose: the user's own
-        // wording is not second-guessed by a default they did not write.
-        for (id in listOf(SubAgentDefinition.BUILT_IN_ID, SubAgentDefinition.SCOUT_ID, SubAgentDefinition.TESTER_ID)) {
-            val spec = SubAgentDefinition.makeBuiltIns().first { it.id == id }
-            assertEquals("$id ships no default brief", "", spec.instructions)
+        // EVERY built-in ships one. An empty brief makes the built-in only a name: the
+        // child gets the same generic loop whichever one is picked, so "Recon Sub Agent"
+        // and "General Sub Agent" behave identically. The brief is what makes the name
+        // true, it costs the main conversation nothing, and the user can still edit it.
+        for (spec in SubAgentDefinition.makeBuiltIns()) {
+            assertTrue("${spec.id} must ship a brief", spec.instructions.length > 400)
+            assertTrue("${spec.id} must fit the bound", spec.instructions.length <= SubAgentLimits.INSTRUCTIONS_MAX_LENGTH)
         }
+    }
+
+    @Test
+    fun `a built-in's brief is a default, not a lock`() {
+        // The split the roster depends on: the brief is editable like any other field the
+        // user owns, and a stored one survives normalize.
+        val mine = SubAgentDefinition.makeBuiltIns().first { it.id == SubAgentDefinition.TESTER_ID }
+            .copy(instructions = "run only the failing class, then report the count")
+        val out = SubAgentRoster.normalize(listOf(mine))
+        assertEquals(
+            "run only the failing class, then report the count",
+            out.first { it.id == SubAgentDefinition.TESTER_ID }.instructions,
+        )
     }
 
     @Test
