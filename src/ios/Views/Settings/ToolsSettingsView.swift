@@ -180,13 +180,10 @@ struct ToolsSettingsView: View {
             Section {
                 toolRow(AppLocalized("Repository digest"), tool: RepoDigestTool.name, icon: "chevron.left.forwardslash.chevron.right", isOn: $repoEnabled)
                 // [T-git-vault] Credentials live in the vault, keyed by host, and are
-                // shared with `git` in the terminal; this page only explains how the
-                // tool authenticates and links there.
-                NavigationLink {
-                    RepoDigestSettingsView()
-                } label: {
-                    Label(AppLocalized("Credentials"), systemImage: "key")
-                }
+                // shared with `git` in the terminal. The old "Repository digest"
+                // settings page is gone: it only explained the auth scheme and linked
+                // here, so a tap that just bounces to another screen was one page too
+                // many. The tool itself and its switch above are unchanged.
                 NavigationLink {
                     GitVaultView()
                 } label: {

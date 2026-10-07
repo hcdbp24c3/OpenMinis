@@ -176,8 +176,6 @@ object Routes {
     /** [T-android-web-search] Settings > Agent Runtime > Web search. */
     const val WEB_SEARCH = "web_search"
     /** [T-android-repo-digest] Settings > Agent Runtime > Repository digest. */
-    const val REPO_DIGEST = "repo_digest"
-
     /** [T-git-vault] Settings › Git vault (host-keyed tokens and SSH keys). */
     const val GIT_VAULT = "git_vault"
     /** [T-mcp-integration-android] MCP Integrations management screen. */
@@ -629,7 +627,6 @@ fun AppNavigation(
                 onAgentsClick = { navController.safeNavigate(Routes.AGENTS) },
                 onAgentToolsClick = { navController.safeNavigate(Routes.AGENT_TOOLS) },
                 onWebSearchClick = { navController.safeNavigate(Routes.WEB_SEARCH) },
-                onRepoDigestClick = { navController.safeNavigate(Routes.REPO_DIGEST) },
                 onGitVaultClick = { navController.safeNavigate(Routes.GIT_VAULT) },
                 onMcpClick = { navController.safeNavigate(Routes.MCP) },
                 onSoulClick = { navController.safeNavigate(Routes.SOUL) },
@@ -1484,15 +1481,6 @@ fun AppNavigation(
         composable(Routes.WEB_SEARCH) {
             com.openminis.app.ui.settings.WebSearchSettingsScreen(
                 onBack = { navController.safePopBackStack() },
-            )
-        }
-
-        // [T-android-repo-digest] How the repo_digest tool authenticates, and a way
-        // into the host-keyed credential store.
-        composable(Routes.REPO_DIGEST) {
-            com.openminis.app.ui.settings.RepoDigestSettingsScreen(
-                onBack = { navController.safePopBackStack() },
-                onOpenVault = { navController.safeNavigate(Routes.GIT_VAULT) },
             )
         }
 

@@ -92,8 +92,6 @@ fun SettingsScreen(
     onAgentToolsClick: () -> Unit = {},
     /** [T-android-web-search] Settings › Web search (engine + API keys). */
     onWebSearchClick: () -> Unit = {},
-    /** [T-android-repo-digest] Settings › Repository digest (how the tool authenticates). */
-    onRepoDigestClick: () -> Unit = {},
     /** [T-git-vault] Settings › Git vault (host-keyed tokens and SSH keys). */
     onGitVaultClick: () -> Unit = {},
     // [T-mcp-integration-android] MCP Integrations page, listed directly below
@@ -218,13 +216,6 @@ fun SettingsScreen(
                 )
                 // [T-android-repo-digest] Next to Web search: both configure a
                 // network tool's backend rather than switching it on.
-                SettingsItem(
-                    icon = Icons.Outlined.Code,
-                    iconColor = Color(0xFF34C759),
-                    title = stringResource(R.string.settings_repo_digest),
-                    subtitle = stringResource(R.string.settings_repo_digest_subtitle),
-                    onClick = onRepoDigestClick,
-                )
                 // [T-git-vault] Directly below Repository digest: the vault holds the
                 // credentials that tool (and `git` in the terminal) authenticate with,
                 // so this is where a user looks when a private repo 404s.
