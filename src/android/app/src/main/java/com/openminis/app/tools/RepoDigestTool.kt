@@ -329,7 +329,13 @@ object RepoDigestTool {
         if (s.isEmpty()) return null
         val host = origin.substringAfter("://").substringBefore('/')
         val provider = detectProvider(host, rawUrl)
-        val parts = s.split('/').filter { it.isNotEmpty() }
+        // Every segment here came from a URL, so percent-escapes have to be decoded
+        // before they reach an API: a URL pasted straight out of the browser's address
+        // bar carries `%20` for every space ("preseed/First%20Run"), and the GitHub
+        // Contents API wants the real path ("preseed/First Run"). Only the URL is
+        // decoded — the `path` argument is already literal, which is why the documented
+        // workaround (repo URL + `path` override) always worked.
+        val parts = s.split('/').filter { it.isNotEmpty() }.map { decodeUrlSegment(it) }
         if (parts.size < 2) return null
         val owner = parts[0]
         var repo = parts[1].removeSuffix(".git")
@@ -375,6 +381,25 @@ object RepoDigestTool {
 
     internal fun isBlobLike(rawUrl: String): Boolean =
         rawUrl.contains("/blob/") || rawUrl.contains("/-/blob/")
+
+    /**
+     * [T-android-repo-digest-percent-path] Percent-decode one URL path segment.
+     *
+     * Two details that a plain `URLDecoder.decode` gets wrong for a PATH:
+     *  - `+` is a literal plus in a URL path (it means space only in a
+     *    `application/x-www-form-urlencoded` query) — GitHub has files named
+     *    `chrome++.ini`, and decoding their `+` to a space would 404 them. The `+` is
+     *    escaped before decoding so it survives;
+     *  - a malformed escape (`%ZZ`, a lone trailing `%`) must not throw out of URL
+     *    parsing: the raw segment is returned instead, so a weird URL still resolves
+     *    the same way it did before this existed.
+     */
+    internal fun decodeUrlSegment(segment: String): String {
+        if ('%' !in segment) return segment
+        return runCatching {
+            java.net.URLDecoder.decode(segment.replace("+", "%2B"), "UTF-8")
+        }.getOrDefault(segment)
+    }
 
     // ── pure helpers (unit-tested) ──────────────────────────────────────────
 

@@ -76,6 +76,73 @@ class RepoDigestToolTest {
         )
     }
 
+    // ── percent-escapes in a pasted URL ────────────────────────
+    //
+    // Reported: a blob URL copied straight out of the browser's address bar failed on
+    // every file whose name contains a space — "…/blob/main/preseed/First%20Run" was
+    // handed to the Contents API with the escape still in it and 404'd as "wrong
+    // path". Only the URL is decoded; a `path` argument is already literal.
+
+    @Test
+    fun `a percent-escaped path in a pasted blob url is decoded before the api sees it`() {
+        assertEquals(
+            RepoDigestTool.RepoRef("owner", "repo", "main", "preseed/First Run"),
+            RepoDigestTool.parseRepoUrl("https://github.com/owner/repo/blob/main/preseed/First%20Run"),
+        )
+        assertEquals(
+            RepoDigestTool.RepoRef("owner", "repo", "main", "preseed/Local State"),
+            RepoDigestTool.parseRepoUrl("https://github.com/owner/repo/blob/main/preseed/Local%20State"),
+        )
+        // GitLab's `/-/` shape and an escaped ref both decode too.
+        assertEquals(
+            RepoDigestTool.RepoRef("group", "project", "main", "My Files/notes.md", "https://gitlab.com", RepoDigestTool.Provider.GITLAB),
+            RepoDigestTool.parseRepoUrl("https://gitlab.com/group/project/-/blob/main/My%20Files/notes.md"),
+        )
+        assertEquals(
+            RepoDigestTool.RepoRef("owner", "repo", "release/x y", null),
+            RepoDigestTool.parseRepoUrl("https://github.com/owner/repo/tree/release%2Fx%20y"),
+        )
+    }
+
+    @Test
+    fun `an escaped name that needs no decoding is left exactly as it is`() {
+        // `chrome++.ini` exists in the wild: in a URL PATH a `+` is a literal plus, not
+        // a space (that meaning belongs to a form-encoded query), so decoding must not
+        // touch it.
+        assertEquals(
+            RepoDigestTool.RepoRef("owner", "repo", "main", "chrome++.ini"),
+            RepoDigestTool.parseRepoUrl("https://github.com/owner/repo/blob/main/chrome++.ini"),
+        )
+        assertEquals(
+            RepoDigestTool.RepoRef("owner", "repo", "main", "a+b c.ini"),
+            RepoDigestTool.parseRepoUrl("https://github.com/owner/repo/blob/main/a+b%20c.ini"),
+        )
+        // A literal percent is `%25`, and non-ASCII arrives as UTF-8 escapes.
+        assertEquals(
+            RepoDigestTool.RepoRef("owner", "repo", "main", "100%done/café.ini"),
+            RepoDigestTool.parseRepoUrl("https://github.com/owner/repo/blob/main/100%25done/caf%C3%A9.ini"),
+        )
+        // Nothing to decode -> byte-identical to the old behaviour.
+        assertEquals(
+            RepoDigestTool.RepoRef("owner", "repo", "main", "src/main.kt"),
+            RepoDigestTool.parseRepoUrl("https://github.com/owner/repo/blob/main/src/main.kt"),
+        )
+    }
+
+    @Test
+    fun `a malformed escape cannot break url parsing`() {
+        // "%ZZ" and a trailing "%" are not decodable; URL parsing must still work and
+        // keep the raw text rather than throw out of the tool.
+        assertEquals(
+            RepoDigestTool.RepoRef("owner", "repo", "main", "weird%ZZname.ini"),
+            RepoDigestTool.parseRepoUrl("https://github.com/owner/repo/blob/main/weird%ZZname.ini"),
+        )
+        assertEquals(
+            RepoDigestTool.RepoRef("owner", "repo", "main", "half%.ini"),
+            RepoDigestTool.parseRepoUrl("https://github.com/owner/repo/blob/main/half%.ini"),
+        )
+    }
+
     // ── multi-host shapes ───────────────────────────────────────────────────
 
     @Test

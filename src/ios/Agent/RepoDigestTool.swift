@@ -292,7 +292,17 @@ enum RepoDigestTool {
         guard !s.isEmpty else { return nil }
         let host = origin.contains("://") ? String(origin.split(separator: "/").dropFirst(2).first ?? "") : ""
         let provider = detectProvider(host: host, url: rawURL)
+        // [T-android-repo-digest-percent-path] Segments came from a URL, so percent
+        // escapes have to be decoded before they reach an API: a URL pasted straight out
+        // of the browser's address bar carries `%20` for every space
+        // ("preseed/First%20Run") while the API wants the real path ("preseed/First Run").
+        // `removingPercentEncoding` leaves `+` alone, which is correct for a PATH —
+        // GitHub has files named `chrome++.ini`, and a form decoder would read that plus
+        // as a space. A malformed escape returns nil, so the raw segment is kept and URL
+        // parsing still succeeds. Only the URL is decoded; the `path` argument is
+        // already literal, which is why the repo-URL + path workaround always worked.
         let parts = s.split(separator: "/").map(String.init).filter { !$0.isEmpty }
+            .map { $0.removingPercentEncoding ?? $0 }
         guard parts.count >= 2 else { return nil }
         let owner = parts[0]
         var repo = parts[1]
