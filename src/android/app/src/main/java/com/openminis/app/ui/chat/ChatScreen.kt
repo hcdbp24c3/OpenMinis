@@ -4030,6 +4030,23 @@ fun ChatScreen(
                         }
                     }.toMap()
                 }
+                // [T-android-copy-scope-cheap] The LAST text block of each turn, on its
+                // own: an agent reply renders as narration, tool cards, then the answer,
+                // and "copy" under that reply should hand back the answer. The map keeps
+                // the last occurrence per message, which is document order.
+                val assistantFinalText = remember(flatItems) {
+                    flatItems.mapNotNull { flat ->
+                        when (flat) {
+                            is FlatChatItem.AssistantMarkdownBlock ->
+                                originalMessageId(flat.messageId) to flat.rawText
+                            is FlatChatItem.AssistantText ->
+                                originalMessageId(flat.messageId) to flat.block.content
+                            is FlatChatItem.AssistantLegacyContent ->
+                                originalMessageId(flat.messageId) to flat.content
+                            else -> null
+                        }
+                    }.toMap()
+                }
                 val lastAssistantMessageId = remember(messages) {
                     messages.lastOrNull { it.role == "assistant" }?.id
                 }
@@ -4824,19 +4841,40 @@ fun ChatScreen(
                                 // joined turn behind a plain "Copy" is what made a
                                 // selected paragraph come back as `a` + tool cards + `b`.
                                 val turnText = assistantTurnText[msgId].orEmpty()
-                                val selectionText = selectionController.selectionTextIn(msgId)
+                                val finalText = assistantFinalText[msgId].orEmpty()
+                                // A cheap question for the label; the text itself is only
+                                // extracted in the click handler below.
+                                val hasSelection = selectionController.hasSelectionIn(msgId)
+                                // One action when the final block IS the turn (an ordinary
+                                // reply, or a turn with no text at all): two identical copy
+                                // buttons would be noise.
+                                val turnMatchesFinal = finalText.isBlank() || finalText == turnText
                                 MessageActionRow(
                                     modifier = Modifier.padding(top = 2.dp),
                                     actions = buildList {
-                                        if (selectionText != null || turnText.isNotBlank()) {
+                                        if (hasSelection || finalText.isNotBlank() || turnText.isNotBlank()) {
                                             add(
                                                 ChatMessageAction(
                                                     Icons.Default.ContentCopy,
-                                                    stringResource(
-                                                        if (selectionText != null) R.string.chat_longpress_copy
-                                                        else R.string.chat_longpress_copy_all,
-                                                    ),
-                                                    onClick = { copyMessageText(selectionController.copyScopeText(msgId, turnText)) },
+                                                    stringResource(R.string.chat_longpress_copy),
+                                                    onClick = {
+                                                        copyMessageText(
+                                                            selectionController.copyScopeText(msgId, finalText, turnText),
+                                                        )
+                                                    },
+                                                ),
+                                            )
+                                        }
+                                        // An agent turn carries narration, tool cards and
+                                        // then the answer: "Copy" takes the answer, and this
+                                        // is the way to take the whole turn (iOS's wording
+                                        // for the same pair).
+                                        if (!turnMatchesFinal) {
+                                            add(
+                                                ChatMessageAction(
+                                                    Icons.Default.ContentCopy,
+                                                    stringResource(R.string.chat_longpress_copy_all),
+                                                    onClick = { copyMessageText(turnText) },
                                                 ),
                                             )
                                         }

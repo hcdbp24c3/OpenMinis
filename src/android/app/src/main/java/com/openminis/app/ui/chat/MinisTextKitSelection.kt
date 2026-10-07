@@ -173,17 +173,37 @@ class SelectionController {
      * "Copy All".
      */
     fun selectionTextIn(messageId: String): String? {
-        if (selection.value == null) return null
-        if (singleMessageId() != messageId) return null
+        if (!hasSelectionIn(messageId)) return null
         return selectedPlainText().takeIf { it.isNotBlank() }
     }
 
     /**
-     * What a message-level Copy should put on the clipboard: the selection when it
-     * belongs to [messageId], otherwise the whole [turnText].
+     * [T-android-copy-scope-cheap] Whether [messageId] has a live selection, WITHOUT
+     * extracting its text.
+     *
+     * This is what a per-row label may read during composition. `selectionTextIn` walks
+     * every shard of the selection and builds strings, and calling it for each assistant
+     * row on each frame made a long chat janky the moment anything was highlighted: the
+     * UI state read is cheap, the text extraction is not, so the label asks the cheap
+     * question and the clipboard path asks the expensive one at click time.
      */
-    fun copyScopeText(messageId: String, turnText: String): String =
-        selectionTextIn(messageId) ?: turnText
+    fun hasSelectionIn(messageId: String): Boolean {
+        val sel = selection.value ?: return false
+        // Both endpoints in this message, and not a caret. Comparing the two positions is
+        // still O(1) — the expensive part of selectionTextIn is the shard walk it does to
+        // BUILD the string, which a label has no business doing every frame.
+        if (sel.start.shard.messageId != messageId) return false
+        if (sel.end.shard.messageId != messageId) return false
+        return !(sel.start.shard == sel.end.shard && sel.start.charOffset == sel.end.charOffset)
+    }
+
+    /**
+     * What a message-level Copy should put on the clipboard: the selection when it
+     * belongs to [messageId], else [finalText] — the closing text block of the turn,
+     * which is the answer rather than the narration above it — else the whole [turnText].
+     */
+    fun copyScopeText(messageId: String, finalText: String, turnText: String): String =
+        selectionTextIn(messageId) ?: finalText.ifBlank { turnText }
 
     /**
      * Resolve the active selection's parent message markdown. Null when
