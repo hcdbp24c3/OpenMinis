@@ -1252,6 +1252,7 @@
     <string name="enhanced_cache_dialog_body">增强缓存将 Anthropic 提示缓存从 5 分钟延长到 1 小时，在长会话中保持上下文，可能产生额外的缓存写入费用。是否开启？</string>
     <string name="enhanced_cache_dialog_confirm">开启</string>
     <string name="chat_longpress_copy">复制</string>
+    <string name="chat_longpress_copy_all">复制全部</string>
     <string name="chat_longpress_retry">重试</string>
     <string name="tool_longpress_rerun_from_here">从此处重新执行</string>
     <string name="tool_longpress_copy_details">拷贝工具信息</string>

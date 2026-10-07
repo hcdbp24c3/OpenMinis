@@ -1382,6 +1382,7 @@
     <string name="enhanced_cache_dialog_body">Enhanced Cache extends Anthropic\'s prompt cache from 5 minutes to 1 hour, keeping context warm for longer sessions. This may add extra cache-write charges. Enable it?</string>
     <string name="enhanced_cache_dialog_confirm">Enable</string>
     <string name="chat_longpress_copy">Copy</string>
+    <string name="chat_longpress_copy_all">Copy All</string>
     <string name="chat_longpress_retry">Retry</string>
     <string name="tool_longpress_rerun_from_here">Re-run from here</string>
     <string name="tool_longpress_copy_details">Copy tool details</string>

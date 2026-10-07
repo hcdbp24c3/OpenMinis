@@ -2,6 +2,7 @@ package com.openminis.app.ui.chat
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -72,6 +73,51 @@ class SelectionCopyScopeTest {
             registerText(ShardText(id, text.getValue(id), null) { y.getValue(id) })
         }
         rememberMessageMarkdown(msg, markdown)
+    }
+
+    // ── a message-level Copy must take the selection, not the turn ──────────
+    //
+    // Reported: an agent turn renders a · tool call · tool call · b · <end>. Pressing
+    // the Copy action under that reply put `a` and `b` on the clipboard, because it
+    // copied the joined turn markdown. iOS has no such trap: its text Copy takes
+    // `selectedRange` and its whole-reply entry is labelled "Copy All".
+
+    @Test
+    fun `copy under a reply takes the selected range, not the whole turn`() {
+        val ctl = controller()
+        val turnText = "Test luôn cho bạn.\nKết quả: search OK.\nweb_fetch — nửa sống nửa chết"
+
+        // Nothing selected: the action is the whole-turn copy ("Copy All").
+        assertEquals(turnText, ctl.copyScopeText(msg, turnText))
+        assertNull(ctl.selectionTextIn(msg))
+
+        // b selected (the last paragraph): Copy takes exactly b.
+        ctl.beginSelection(TextPosition(s4, 0))
+        ctl.replaceEnd(TextPosition(s4, text.getValue(s4).length))
+        assertEquals("web_fetch — nửa sống nửa chết", ctl.copyScopeText(msg, turnText))
+        assertEquals("web_fetch — nửa sống nửa chết", ctl.selectionTextIn(msg))
+    }
+
+    @Test
+    fun `a selection in another message does not leak into this reply's copy`() {
+        val ctl = controller()
+        // Same controller, different message id: the row under THIS message must keep
+        // copying its own turn rather than text highlighted somewhere else.
+        ctl.beginSelection(TextPosition(s4, 0))
+        ctl.replaceEnd(TextPosition(s4, text.getValue(s4).length))
+        assertEquals("the turn", ctl.copyScopeText("OTHER", "the turn"))
+        assertNull(ctl.selectionTextIn("OTHER"))
+    }
+
+    @Test
+    fun `a collapsed selection is not treated as a selection`() {
+        val ctl = controller()
+        // A caret (or a cleared selection) must fall back to the whole turn: an empty
+        // clipboard is worse than an over-wide one.
+        ctl.beginSelection(TextPosition(s1, 2))
+        ctl.replaceEnd(TextPosition(s1, 2))
+        assertNull(ctl.selectionTextIn(msg))
+        assertEquals("turn", ctl.copyScopeText(msg, "turn"))
     }
 
     // ── the reported case ───────────────────────────────────────────────────

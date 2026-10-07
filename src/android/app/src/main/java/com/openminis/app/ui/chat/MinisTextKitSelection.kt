@@ -160,7 +160,33 @@ class SelectionController {
         messageMarkdownCache[messageId] = markdown
     }
 
-    /** Resolve the active selection's parent message markdown. Null when
+    /**
+     * [T-android-copy-scope-selection] The live selection IF it belongs to
+     * [messageId], else null.
+     *
+     * A message-level Copy action sits under a whole turn — an agent reply renders as
+     * text, then tool cards, then more text — so copying the turn under a button that
+     * merely says "Copy" handed back everything the user had NOT selected: select the
+     * closing paragraph of `a · <tool call> · <tool call> · b · <end>` and the clipboard
+     * got `a` and `b` together. iOS does not have that trap: its text Copy takes
+     * `selectedRange` when there is one, and its whole-reply entry is explicitly labelled
+     * "Copy All".
+     */
+    fun selectionTextIn(messageId: String): String? {
+        if (selection.value == null) return null
+        if (singleMessageId() != messageId) return null
+        return selectedPlainText().takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * What a message-level Copy should put on the clipboard: the selection when it
+     * belongs to [messageId], otherwise the whole [turnText].
+     */
+    fun copyScopeText(messageId: String, turnText: String): String =
+        selectionTextIn(messageId) ?: turnText
+
+    /**
+     * Resolve the active selection's parent message markdown. Null when
      *  the selection spans multiple messages OR the cache never saw it. */
     fun selectionMessageMarkdown(): String? {
         val msgId = singleMessageId() ?: return null
