@@ -324,7 +324,11 @@ struct SubAgentsCollection: ConfigCollection {
     /// instructions are the standing instructions for every delegation that
     /// names no agent, which is exactly the thing a user wants to set globally.
     private func instructionsField(_ id: String, seg: String) -> ConfigField {
-        let isBuiltIn = id == SubAgentDefinition.builtInId
+        // [T-sub-agent-builtin-roster] By ID membership, not one hard-coded id: every
+        // built-in's instructions are standing instructions for delegations that name
+        // no agent, and a check against `builtin.general` alone would describe the
+        // scout's own instructions as global ones.
+        let isBuiltIn = SubAgentDefinition.isBuiltInId(id)
         return ClosureField(
             path: "subagents.\(seg).instructions",
             displayName: "Instructions",

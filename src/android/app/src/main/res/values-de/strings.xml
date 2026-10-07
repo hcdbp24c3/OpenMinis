@@ -1917,9 +1917,13 @@
     <string name="agent_tools_ask">Ask user</string>
     <string name="agent_tools_ask_footer">Let the agent ask you a structured multiple-choice question when a choice is genuinely ambiguous (which option you prefer, which direction to take) instead of guessing. The run pauses until you answer or skip.</string>
 
-    <string name="settings_repo_digest">Repository digest</string>
-    <string name="settings_repo_digest_subtitle">GitHub token for the repo_digest tool</string>
     <string name="agent_tools_repo_digest">Repository digest</string>
     <string name="agent_tools_repo_digest_footer">Read a GitHub repository as a digest — file tree plus the contents that matter — in one call, instead of cloning it or browsing page by page. Binary, vendored, minified and lock files are skipped; include/exclude globs narrow it further.</string>
 
+    <string name="sub_agent_builtin_scout_name">Aufklärungs-Subagent</string>
+    <string name="sub_agent_builtin_scout_description">Nur lesende Aufklärung: durchsucht eine Codebasis, ein Repository oder eine Reihe von Seiten und liefert eine kompakte Übersicht — was wo liegt, wie es zusammenhängt und was als Nächstes zu lesen ist. Angewiesen, nichts zu ändern.</string>
+    <string name="sub_agent_builtin_reviewer_name">Code-Review-Subagent</string>
+    <string name="sub_agent_builtin_reviewer_description">Prüft eine Änderung oder eine Datei auf Korrektheit, Sicherheit und Testabdeckung und meldet konkrete Befunde mit Datei und Zeile. Angewiesen, nichts zu reparieren: der Befund ist das Ergebnis.</string>
+    <string name="sub_agent_builtin_tester_name">Testlauf-Subagent</string>
+    <string name="sub_agent_builtin_tester_description">Prüft eine Änderung, indem er Build und Tests des Projekts in der Sandbox ausführt, und meldet den genauen Befehl, dessen Ausgabe und den Exit-Status — grün oder rot, mit Beleg.</string>
 </resources>

@@ -102,12 +102,15 @@ class SubAgentRosterHygieneTest {
     private fun def(id: String, name: String, order: Int = 1) =
         SubAgentDefinition(id = id, name = name, description = "d", sortOrder = order)
 
+    /** How many built-ins ship; the counts below are relative to it. */
+    private val builtInCount get() = SubAgentDefinition.BUILT_IN_IDS.size
+
     @Test
     fun `a nameless definition is dropped rather than advertised as an empty enum value`() {
         // The settings screen creates one the moment "Add" is tapped, so this
         // is the ordinary state of a row the user backed out of.
         val out = SubAgentRoster.normalize(listOf(def("a", ""), def("b", "   ")))
-        assertEquals(1, out.size)
+        assertEquals(builtInCount, out.size)
         assertEquals(SubAgentDefinition.BUILT_IN_ID, out[0].id)
         assertTrue(out.none { it.name.isBlank() })
     }
@@ -119,8 +122,8 @@ class SubAgentRosterHygieneTest {
         val out = SubAgentRoster.normalize(
             listOf(def("a", "Researcher", 1), def("b", "researcher", 2)),
         )
-        assertEquals(2, out.size)
-        assertEquals("a", out[1].id)
+        assertEquals(builtInCount + 1, out.size)
+        assertEquals("a", out[builtInCount].id)
     }
 
     @Test
@@ -128,7 +131,7 @@ class SubAgentRosterHygieneTest {
         val out = SubAgentRoster.normalize(
             listOf(def("a", "Résumé", 1), def("b", "Resume", 2)),
         )
-        assertEquals(2, out.size)
+        assertEquals(builtInCount + 1, out.size)
     }
 
     @Test
@@ -136,8 +139,8 @@ class SubAgentRosterHygieneTest {
         val out = SubAgentRoster.normalize(
             listOf(def("a", SubAgentDefinition.BUILT_IN_NAME, 1)),
         )
-        assertEquals(1, out.size)
-        assertTrue(out[0].isBuiltIn)
+        assertEquals(builtInCount, out.size)
+        assertTrue(out.all { it.isBuiltIn })
     }
 
     @Test
@@ -145,7 +148,7 @@ class SubAgentRosterHygieneTest {
         val out = SubAgentRoster.normalize(
             listOf(def("a", "", 1), def("b", "Beta", 2), def("c", "", 3), def("d", "Delta", 4)),
         )
-        assertEquals(listOf(0, 1, 2), out.map { it.sortOrder })
-        assertEquals(listOf("Beta", "Delta"), out.drop(1).map { it.name })
+        assertEquals((0 until builtInCount + 2).toList(), out.map { it.sortOrder })
+        assertEquals(listOf("Beta", "Delta"), out.drop(builtInCount).map { it.name })
     }
 }

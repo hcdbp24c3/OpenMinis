@@ -31,10 +31,17 @@ class SubAgentReorderTest {
         )
     )
 
+    /** The names of every built-in, in roster order. */
+    private val builtInNames = SubAgentDefinition.makeBuiltIns().map { it.name }
+
     /** Mirrors SubAgentsScreen.move(): reorder ids, then let the loader rule. */
     private fun applyMove(list: List<SubAgentDefinition>, from: Int, to: Int): List<String> {
         if (from !in list.indices || to !in list.indices) return list.map { it.name }
-        if (from == 0 || to == 0) return list.map { it.name }
+        // The guard is the first CUSTOM index, not a hard-coded 0: with several
+        // built-ins pinned to the front, index 0 alone would let a custom row be
+        // dropped inside their block.
+        val firstCustom = list.indexOfFirst { !it.isBuiltIn }.let { if (it < 0) list.size else it }
+        if (from < firstCustom || to < firstCustom) return list.map { it.name }
         val ids = list.map { it.id }.toMutableList()
         ids.add(to, ids.removeAt(from))
         val byId = list.associateBy { it.id }
@@ -43,50 +50,70 @@ class SubAgentReorderTest {
         return SubAgentRoster.normalize(reordered).map { it.name }
     }
 
+    /** Index of the first custom row in a normalized roster. */
+    private fun firstCustom(list: List<SubAgentDefinition>) =
+        list.indexOfFirst { !it.isBuiltIn }.let { if (it < 0) list.size else it }
+
     @Test
     fun `moving a custom agent up reorders it`() {
+        val start = roster()
+        val c = firstCustom(start)
         assertEquals(
-            listOf(SubAgentDefinition.BUILT_IN_NAME, "beta", "alpha", "gamma"),
-            applyMove(roster(), from = 2, to = 1),
+            builtInNames + listOf("beta", "alpha", "gamma"),
+            applyMove(start, from = c + 1, to = c),
         )
     }
 
     @Test
     fun `moving a custom agent down reorders it`() {
+        val start = roster()
+        val c = firstCustom(start)
         assertEquals(
-            listOf(SubAgentDefinition.BUILT_IN_NAME, "beta", "alpha", "gamma"),
-            applyMove(roster(), from = 1, to = 2),
+            builtInNames + listOf("beta", "alpha", "gamma"),
+            applyMove(start, from = c, to = c + 1),
         )
     }
 
     @Test
-    fun `the built-in cannot be moved off the front`() {
+    fun `a built-in cannot be moved off the front`() {
         // Guarded in move() AND re-pinned by normalize(): two independent
-        // reasons this cannot happen, because a roster whose first entry is not
-        // the built-in would change which agent an unnamed delegation lands on.
+        // reasons this cannot happen, because a roster whose first entries are
+        // not the built-ins would change what the model is told they are for.
         assertEquals(
-            listOf(SubAgentDefinition.BUILT_IN_NAME, "alpha", "beta", "gamma"),
-            applyMove(roster(), from = 0, to = 2),
+            builtInNames + listOf("alpha", "beta", "gamma"),
+            applyMove(roster(), from = 0, to = 3),
         )
     }
 
     @Test
-    fun `nothing can displace the built-in from index 0`() {
+    fun `nothing can displace the built-ins from the front`() {
         assertEquals(
-            listOf(SubAgentDefinition.BUILT_IN_NAME, "alpha", "beta", "gamma"),
-            applyMove(roster(), from = 3, to = 0),
+            builtInNames + listOf("alpha", "beta", "gamma"),
+            applyMove(roster(), from = roster().lastIndex, to = 0),
         )
+    }
+
+    @Test
+    fun `a custom row cannot be moved into the built-in block`() {
+        // The move is refused rather than silently undone by normalize's re-pin:
+        // the list comes back exactly as it went in.
+        val start = roster()
+        val c = firstCustom(start)
+        assertEquals(start.map { it.name }, applyMove(start, from = c, to = c - 1))
+        assertEquals(start.map { it.name }, applyMove(start, from = c, to = 0))
     }
 
     @Test
     fun `sortOrder stays dense after a move`() {
-        val ids = roster().map { it.id }.toMutableList()
-        ids.add(1, ids.removeAt(3))
-        val byId = roster().associateBy { it.id }
+        val start = roster()
+        val c = firstCustom(start)
+        val ids = start.map { it.id }.toMutableList()
+        ids.add(c, ids.removeAt(c + 1))
+        val byId = start.associateBy { it.id }
         val out = SubAgentRoster.normalize(
             ids.mapNotNull { byId[it] }.mapIndexed { i, d -> d.copy(sortOrder = i) }
         )
         // A gap here would make the NEXT move compute the wrong destination.
-        assertEquals(listOf(0, 1, 2, 3), out.map { it.sortOrder })
+        assertEquals((0 until start.size).toList(), out.map { it.sortOrder })
     }
 }

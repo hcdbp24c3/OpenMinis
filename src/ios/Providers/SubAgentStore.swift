@@ -120,8 +120,10 @@ final class SubAgentStore: ObservableObject {
         // already shows them read-only; enforcing it here too covers a synced
         // payload written by another device or a future caller. Model and
         // instructions are kept as supplied.
-        if incoming.isBuiltIn {
-            let canonical = SubAgentDefinition.makeBuiltIn()
+        // [T-sub-agent-builtin-roster] Canonical is looked up BY ID: with more than one
+        // built-in, restoring "the" built-in's name would rename a scout into the
+        // general agent the moment the user changed its model group.
+        if incoming.isBuiltIn, let canonical = SubAgentDefinition.makeBuiltIns().first(where: { $0.id == incoming.id }) {
             incoming.name = canonical.name
             incoming.description = canonical.description
         }
@@ -142,7 +144,10 @@ final class SubAgentStore: ObservableObject {
     /// Delete one definition. The built-in cannot be removed — it is the target
     /// of every delegation that names no agent.
     func removeSubAgent(id: String) {
-        guard id != SubAgentDefinition.builtInId else {
+        // Every built-in is undeletable, not just the general one: each is a shipped
+        // definition with a pinned id, and normalize would re-seed it on the next load
+        // anyway — deleting one would silently come back.
+        guard !SubAgentDefinition.isBuiltInId(id) else {
             logger.warning("[SubAgents] refusing to delete the built-in definition")
             return
         }
@@ -160,16 +165,21 @@ final class SubAgentStore: ObservableObject {
     }
 
     /// Reorder the custom entries. Order is disclosure order in the roster the
-    /// main model reads, so it is a real setting. The built-in stays first.
+    /// main model reads, so it is a real setting. Every built-in stays first.
+    ///
+    /// [T-sub-agent-builtin-roster] The built-ins are skipped by ID-list membership
+    /// rather than by comparing against one hard-coded id: with several pinned entries,
+    /// a single-id check would let a custom row be dropped into their block (normalize
+    /// re-pins them, so the move would silently do nothing).
     func reorderSubAgents(_ orderedIds: [String]) {
         let byId = Dictionary(uniqueKeysWithValues: subAgents.map { ($0.id, $0) })
         var list: [SubAgentDefinition] = []
-        for id in orderedIds where id != SubAgentDefinition.builtInId {
+        for id in orderedIds where !SubAgentDefinition.isBuiltInId(id) {
             if let d = byId[id] { list.append(d) }
         }
         // Anything the caller omitted keeps its relative position at the end,
         // so a partial list can never silently drop a definition.
-        for d in subAgents where d.id != SubAgentDefinition.builtInId && !orderedIds.contains(d.id) {
+        for d in subAgents where !SubAgentDefinition.isBuiltInId(d.id) && !orderedIds.contains(d.id) {
             list.append(d)
         }
         for i in list.indices { list[i].sortOrder = i + 1 }

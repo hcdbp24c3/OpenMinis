@@ -160,12 +160,16 @@ fun SubAgentsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                     // the capability is what matters, and the repo API
                     // (reorderSubAgents) already existed with no caller.
                     //
-                    // The built-in is pinned to index 0 by normalize(), so it
-                    // can neither move nor be displaced by the row below it.
+                    // The built-ins are pinned to the FRONT by normalize() — all of
+                    // them, not just the general one — so a built-in row has no arrows
+                    // and the first custom row cannot move up into their block.
+                    val firstCustomIndex = remember(roster) {
+                        roster.indexOfFirst { !it.isBuiltIn }.let { if (it < 0) roster.size else it }
+                    }
                     if (roster.size > 1 && !def.isBuiltIn) {
                         IconButton(
                             onClick = { move(repo, roster, i, i - 1); generation++ },
-                            enabled = i > 1,
+                            enabled = i > firstCustomIndex,
                         ) {
                             Icon(
                                 Icons.Default.KeyboardArrowUp,
@@ -530,7 +534,13 @@ private fun move(
     to: Int,
 ) {
     if (from !in roster.indices || to !in roster.indices) return
-    if (from == 0 || to == 0) return
+    // [T-sub-agent-builtin-roster] The built-ins are pinned to the front, and there is
+    // more than one of them: a hard-coded index 0 (what a single-built-in roster needed)
+    // would let a custom row be dropped INTO their block, where normalize re-pins the
+    // built-ins and the move silently does nothing. The block's first custom index is
+    // computed from the roster itself.
+    val firstCustom = roster.indexOfFirst { !it.isBuiltIn }.let { if (it < 0) roster.size else it }
+    if (from < firstCustom || to < firstCustom) return
     val ids = roster.map { it.id }.toMutableList()
     ids.add(to, ids.removeAt(from))
     repo.reorderSubAgents(ids)

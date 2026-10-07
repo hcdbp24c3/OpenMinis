@@ -1896,8 +1896,6 @@
     <string name="agent_tools_ask">Ask user</string>
     <string name="agent_tools_ask_footer">Let the agent ask you a structured multiple-choice question when a choice is genuinely ambiguous (which option you prefer, which direction to take) instead of guessing. The run pauses until you answer or skip.</string>
 
-    <string name="settings_repo_digest">Repository digest</string>
-    <string name="settings_repo_digest_subtitle">GitHub token for the repo_digest tool</string>
     <string name="agent_tools_repo_digest">Repository digest</string>
     <string name="agent_tools_repo_digest_footer">Read a GitHub repository as a digest — file tree plus the contents that matter — in one call, instead of cloning it or browsing page by page. Binary, vendored, minified and lock files are skipped; include/exclude globs narrow it further.</string>
 

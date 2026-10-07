@@ -39,22 +39,69 @@ class SubAgentDefinitionTest {
 
     // ── The built-in always exists and always leads ─────────────────────────
 
+    /** How many built-ins this build ships; every count below is relative to it. */
+    private val builtInCount get() = SubAgentDefinition.BUILT_IN_IDS.size
+
     @Test
-    fun `an empty roster normalizes to the built-in alone`() {
+    fun `an empty roster normalizes to the built-ins alone`() {
         val out = SubAgentRoster.normalize(emptyList())
-        assertEquals(1, out.size)
-        assertEquals(SubAgentDefinition.BUILT_IN_ID, out[0].id)
-        assertEquals(SubAgentDefinition.BUILT_IN_NAME, out[0].name)
-        assertTrue(out[0].isBuiltIn)
-        assertEquals(0, out[0].sortOrder)
+        assertEquals(builtInCount, out.size)
+        // Ids AND the canonical names, in spec order: the tool schema advertises them
+        // as the `agent` enum, so both the set and the order are part of the contract.
+        assertEquals(SubAgentDefinition.BUILT_IN_IDS, out.map { it.id })
+        assertEquals(SubAgentDefinition.makeBuiltIns().map { it.name }, out.map { it.name })
+        assertTrue(out.all { it.isBuiltIn })
+        assertEquals((0 until builtInCount).toList(), out.map { it.sortOrder })
+    }
+
+    @Test
+    fun `an older roster that knew only the general built-in gains the rest`() {
+        // The upgrade path, and the reason built-ins are matched by ID against the
+        // canonical spec rather than read from the store: a roster written by the build
+        // that shipped a single built-in must come back with all of them, and the user's
+        // own agent must stay behind them.
+        val stored = listOf(
+            SubAgentDefinition.makeBuiltIn().copy(sortOrder = 0),
+            custom("a", "Researcher", sortOrder = 1),
+        )
+        val out = SubAgentRoster.normalize(stored)
+        assertEquals(SubAgentDefinition.BUILT_IN_IDS, out.take(builtInCount).map { it.id })
+        assertEquals(listOf("Researcher"), out.drop(builtInCount).map { it.name })
+        // Every built-in row is flagged and nothing else is: the flag drives the
+        // "cannot delete"/"cannot reorder" rules in the UI.
+        assertTrue(out.all { SubAgentDefinition.isBuiltInId(it.id) == it.isBuiltIn })
+    }
+
+    @Test
+    fun `a built-in keeps the user's model and instructions but not their words for its name`() {
+        // The split the roster depends on: name/description are the model's contract
+        // (canonical), everything else on the row is the user's.
+        val mine = SubAgentDefinition.makeBuiltIns()[1].copy(
+            name = "Tên tiếng Việt",
+            description = "mô tả",
+            instructions = "only read, never write",
+            modelGroupId = "group-7",
+        )
+        val out = SubAgentRoster.normalize(listOf(mine))
+        val scout = out.first { it.id == SubAgentDefinition.SCOUT_ID }
+        assertEquals(SubAgentDefinition.SCOUT_NAME, scout.name)
+        assertEquals(SubAgentDefinition.SCOUT_DESCRIPTION, scout.description)
+        assertEquals("only read, never write", scout.instructions)
+        assertEquals("group-7", scout.modelGroupId)
+    }
+
+    @Test
+    fun `a custom agent may not take a built-in's name`() {
+        val out = SubAgentRoster.normalize(listOf(custom("x", SubAgentDefinition.SCOUT_NAME, 1)))
+        assertEquals(builtInCount, out.size)
     }
 
     @Test
     fun `a roster missing the built-in gets it reinserted at the front`() {
         val out = SubAgentRoster.normalize(listOf(custom("a", "Researcher", sortOrder = 0)))
-        assertEquals(2, out.size)
+        assertEquals(builtInCount + 1, out.size)
         assertEquals(SubAgentDefinition.BUILT_IN_ID, out[0].id)
-        assertEquals("Researcher", out[1].name)
+        assertEquals("Researcher", out[builtInCount].name)
     }
 
     @Test
@@ -110,7 +157,7 @@ class SubAgentDefinitionTest {
             custom("impostor", "Fake", isBuiltIn = true),
         )
         val out = SubAgentRoster.normalize(input)
-        assertEquals(1, out.size)
+        assertEquals(builtInCount, out.size)
         assertEquals(SubAgentDefinition.BUILT_IN_ID, out[0].id)
     }
 
@@ -121,7 +168,7 @@ class SubAgentDefinitionTest {
             custom(SubAgentDefinition.BUILT_IN_ID, "Impostor"),
         )
         val out = SubAgentRoster.normalize(input)
-        assertEquals(1, out.size)
+        assertEquals(builtInCount, out.size)
         assertEquals(SubAgentDefinition.BUILT_IN_NAME, out[0].name)
     }
 
@@ -133,6 +180,9 @@ class SubAgentDefinitionTest {
         val out = SubAgentRoster.normalize(many)
         assertEquals(SubAgentLimits.MAX_COUNT, out.size)
         assertEquals(SubAgentDefinition.BUILT_IN_ID, out[0].id)
+        // The built-ins hold their slots: the bound is on the roster the model reads,
+        // not on user rows alone.
+        assertEquals(SubAgentLimits.MAX_COUNT - builtInCount, out.count { !it.isBuiltIn })
     }
 
     @Test
@@ -143,7 +193,7 @@ class SubAgentDefinitionTest {
             description = "d".repeat(500),
         ).copy(instructions = "i".repeat(9000))
         val out = SubAgentRoster.normalize(listOf(long))
-        val got = out[1]
+        val got = out[builtInCount]
         assertEquals(SubAgentLimits.NAME_MAX_LENGTH, got.name.length)
         assertEquals(SubAgentLimits.DESCRIPTION_MAX_LENGTH, got.description.length)
         assertEquals(SubAgentLimits.INSTRUCTIONS_MAX_LENGTH, got.instructions.length)
@@ -158,9 +208,9 @@ class SubAgentDefinitionTest {
             custom("c", "Gamma", sortOrder = 30),
         )
         val out = SubAgentRoster.normalize(input)
-        assertEquals(listOf(0, 1, 2, 3), out.map { it.sortOrder })
+        assertEquals((0 until builtInCount + 3).toList(), out.map { it.sortOrder })
         // Ordering follows the stored sortOrder, not input order.
-        assertEquals(listOf("Beta", "Gamma", "Alpha"), out.drop(1).map { it.name })
+        assertEquals(listOf("Beta", "Gamma", "Alpha"), out.drop(builtInCount).map { it.name })
     }
 
     @Test
@@ -172,7 +222,7 @@ class SubAgentDefinitionTest {
             listOf(custom("aaa", "A", sortOrder = 5), custom("zzz", "Z", sortOrder = 5)),
         )
         assertEquals(a.map { it.id }, b.map { it.id })
-        assertEquals(listOf("A", "Z"), a.drop(1).map { it.name })
+        assertEquals(listOf("A", "Z"), a.drop(builtInCount).map { it.name })
     }
 
     @Test
@@ -250,8 +300,8 @@ class SubAgentPersistenceTest {
         val legacy = """{"instances":[],"modelEntries":[],"modelGroups":[]}"""
         val cfg = json.decodeFromString<com.openminis.app.data.model.ProviderConfig>(legacy)
         assertTrue(cfg.subAgents.isEmpty())
-        // …and normalizing that empty list is what materializes the built-in.
-        assertEquals(1, SubAgentRoster.normalize(cfg.subAgents).size)
+        // …and normalizing that empty list is what materializes the built-ins.
+        assertEquals(SubAgentDefinition.BUILT_IN_IDS.size, SubAgentRoster.normalize(cfg.subAgents).size)
     }
 
     @Test

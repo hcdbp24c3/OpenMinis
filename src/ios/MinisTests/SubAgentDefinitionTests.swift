@@ -18,19 +18,54 @@ final class SubAgentDefinitionTests: XCTestCase {
 
     // MARK: - ensureBuiltIn / self-heal
 
-    func testEmptyRosterGainsTheBuiltIn() {
+    /// How many built-ins ship; every count below is relative to it.
+    private var builtInCount: Int { SubAgentDefinition.allBuiltInIds.count }
+    private var builtInNames: [String] { SubAgentDefinition.makeBuiltIns().map(\.name) }
+
+    func testEmptyRosterGainsTheBuiltIns() {
         let out = SubAgentRoster.normalize([])
-        XCTAssertEqual(out.count, 1)
-        XCTAssertEqual(out[0].id, SubAgentDefinition.builtInId)
-        XCTAssertTrue(out[0].isBuiltIn)
-        XCTAssertEqual(out[0].sortOrder, 0)
+        XCTAssertEqual(out.count, builtInCount)
+        XCTAssertEqual(out.map(\.id), SubAgentDefinition.allBuiltInIds)
+        XCTAssertEqual(out.map(\.name), builtInNames)
+        XCTAssertTrue(out.allSatisfy { $0.isBuiltIn })
+        XCTAssertEqual(out.map(\.sortOrder), Array(0..<builtInCount))
     }
 
-    func testRosterWithoutBuiltInGetsItBack() {
+    func testRosterWithoutBuiltInsGetsThemBack() {
         let out = SubAgentRoster.normalize([custom("Translator"), custom("Reviewer", order: 2)])
-        XCTAssertEqual(out.count, 3)
-        XCTAssertEqual(out[0].id, SubAgentDefinition.builtInId, "built-in is always first")
-        XCTAssertEqual(out.map(\.name).dropFirst(), ["Translator", "Reviewer"])
+        XCTAssertEqual(out.count, builtInCount + 2)
+        XCTAssertEqual(out[0].id, SubAgentDefinition.builtInId, "built-ins are always first")
+        XCTAssertEqual(Array(out.map(\.name).dropFirst(builtInCount)), ["Translator", "Reviewer"])
+    }
+
+    /// A roster written by a build that shipped a single built-in must come back with
+    /// all of them — the upgrade path, and the reason built-ins are matched by ID
+    /// against the canonical spec instead of read from the store.
+    func testOlderRosterGainsTheMissingBuiltIns() {
+        let out = SubAgentRoster.normalize([SubAgentDefinition.makeBuiltIn(), custom("Translator")])
+        XCTAssertEqual(out.prefix(builtInCount).map(\.id), SubAgentDefinition.allBuiltInIds)
+        XCTAssertEqual(out.last?.name, "Translator")
+    }
+
+    /// The split the roster depends on: name/description are the model's contract
+    /// (canonical for a built-in), everything else on the row is the user's.
+    func testBuiltInKeepsUserFieldsButNotUserWording() {
+        var mine = SubAgentDefinition.makeBuiltIns()[1]
+        mine.name = "Tên tiếng Việt"
+        mine.description = "mô tả"
+        mine.instructions = "only read, never write"
+        mine.modelGroupId = "group-7"
+        let out = SubAgentRoster.normalize([mine])
+        let scout = out.first { $0.id == SubAgentDefinition.scoutId }
+        XCTAssertEqual(scout?.name, SubAgentDefinition.scoutName)
+        XCTAssertEqual(scout?.description, SubAgentDefinition.scoutDescription)
+        XCTAssertEqual(scout?.instructions, "only read, never write")
+        XCTAssertEqual(scout?.modelGroupId, "group-7")
+    }
+
+    func testCustomAgentMayNotTakeABuiltInName() {
+        let out = SubAgentRoster.normalize([custom(SubAgentDefinition.scoutName, order: 1)])
+        XCTAssertEqual(out.count, builtInCount)
     }
 
     /// A synced roster can carry the built-in anywhere in the array; it is
@@ -48,7 +83,7 @@ final class SubAgentDefinitionTests: XCTestCase {
     func testCustomEntryCannotClaimBuiltInIdentity() {
         let impostor = SubAgentDefinition(id: "x", name: "Impostor", description: "d", isBuiltIn: true)
         let out = SubAgentRoster.normalize([impostor])
-        XCTAssertEqual(out.count, 1, "the impostor is dropped, not promoted")
+        XCTAssertEqual(out.count, builtInCount, "the impostor is dropped, not promoted")
         XCTAssertEqual(out[0].id, SubAgentDefinition.builtInId)
     }
 
@@ -58,8 +93,11 @@ final class SubAgentDefinitionTests: XCTestCase {
         let many = (1...25).map { custom("Agent \($0)", order: $0) }
         let out = SubAgentRoster.normalize(many)
         XCTAssertEqual(out.count, SubAgentLimits.maxCount)
-        XCTAssertEqual(out[0].id, SubAgentDefinition.builtInId, "the built-in keeps its slot")
-        XCTAssertEqual(out.last?.name, "Agent 9", "the first 9 custom entries by sortOrder survive")
+        XCTAssertEqual(out[0].id, SubAgentDefinition.builtInId, "the built-ins keep their slots")
+        XCTAssertEqual(out.count { !$0.isBuiltIn }, SubAgentLimits.maxCount - builtInCount,
+                       "the cap counts the whole roster the model reads, not user rows alone")
+        XCTAssertEqual(out.last?.name, "Agent \(SubAgentLimits.maxCount - builtInCount)",
+                       "the first custom entries by sortOrder survive")
     }
 
     func testOverLongFieldsAreClampedNotRejected() {
@@ -121,9 +159,9 @@ final class SubAgentDefinitionTests: XCTestCase {
     /// [T-subagent-own-store] The roster's own file decodes to a valid roster
     /// even when it is absent or malformed — this runs on data that may have
     /// arrived over iCloud from a newer build, and must never block startup.
-    func testAbsentRosterNormalizesToBuiltInOnly() throws {
+    func testAbsentRosterNormalizesToBuiltInsOnly() throws {
         let roster = SubAgentRoster.normalize([])
-        XCTAssertEqual(roster.count, 1)
+        XCTAssertEqual(roster.count, builtInCount)
         XCTAssertEqual(roster[0].id, SubAgentDefinition.builtInId)
     }
 
@@ -155,7 +193,7 @@ final class SubAgentDefinitionTests: XCTestCase {
         let back = SubAgentRoster.normalize(try JSONDecoder().decode([SubAgentDefinition].self, from: data))
 
         XCTAssertEqual(back, roster, "the roster must survive a write/reload verbatim")
-        XCTAssertEqual(back.count, 3, "built-in + the two custom agents")
+        XCTAssertEqual(back.count, builtInCount + 2, "the built-ins + the two custom agents")
         XCTAssertTrue(back.contains { $0.id == "a1" }, "a custom agent must not be lost on reload")
         XCTAssertTrue(back.contains { $0.id == "a2" })
         XCTAssertEqual(back.first?.id, SubAgentDefinition.builtInId, "built-in stays first")

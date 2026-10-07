@@ -65,17 +65,39 @@ struct SubAgentDefinition: Identifiable, Codable, Hashable {
         "Open-ended work that needs its own tool loop: exploring a codebase or the web over many rounds, "
         + "digesting bulk output into a conclusion, or running independent branches in parallel."
 
-    /// Localized label for the settings list and editor. Only the built-in has
-    /// one — a user-created agent is shown exactly as the user named it.
+    /// Localized label for the settings list and editor. Only the built-ins have one —
+    /// a user-created agent is shown exactly as the user named it, and a built-in this
+    /// build does not know (a roster synced from a newer one) keeps its stored text.
+    ///
+    /// Keyed by id with LITERAL keys: `AppLocalized` takes a `LocalizationValue`, which a
+    /// runtime `String` cannot become, and a literal switch keeps the labels in the
+    /// catalog where the translators can see them.
     var displayName: String {
-        isBuiltIn ? AppLocalized("General Sub Agent") : name
+        guard isBuiltIn else { return name }
+        switch id {
+        case Self.builtInId: return AppLocalized("General Sub Agent")
+        case Self.scoutId: return AppLocalized("Recon Sub Agent")
+        case Self.reviewerId: return AppLocalized("Code Review Sub Agent")
+        case Self.testerId: return AppLocalized("Test Runner Sub Agent")
+        default: return name
+        }
     }
 
     /// Localized description for the settings screen, mirroring `displayName`.
     var displayDescription: String {
-        isBuiltIn
-            ? AppLocalized("Open-ended work that needs its own tool loop: exploring a codebase or the web over many rounds, digesting bulk output into a conclusion, or running independent branches in parallel.")
-            : description
+        guard isBuiltIn else { return description }
+        switch id {
+        case Self.builtInId:
+            return AppLocalized("Open-ended work that needs its own tool loop: exploring a codebase or the web over many rounds, digesting bulk output into a conclusion, or running independent branches in parallel.")
+        case Self.scoutId:
+            return AppLocalized("Read-only reconnaissance: map a codebase, a repository or a set of pages and return a compact brief — where things live, how they connect, and what to read next. Told not to edit.")
+        case Self.reviewerId:
+            return AppLocalized("Review a change or a file for correctness, security and test coverage, and report concrete findings with the file and line. Told not to fix: the finding is the deliverable.")
+        case Self.testerId:
+            return AppLocalized("Verify a change by running the project's build and tests in the sandbox, then report the exact command, its output and its exit status — green or red, with the evidence.")
+        default:
+            return description
+        }
     }
 
     let id: String
@@ -122,6 +144,66 @@ struct SubAgentDefinition: Identifiable, Codable, Hashable {
 
     /// The built-in general sub agent, inserted by `ensureBuiltIn` when absent.
     ///
+    // MARK: - Built-in roster
+
+    /// [T-sub-agent-builtin-roster] Three more built-ins beside the general one, one
+    /// per SHAPE of delegated work: find, judge, verify. Mirrors Android
+    /// `SubAgentDefinition.makeBuiltIns()` — same ids, same canonical English
+    /// name/description, because those two strings are the tool-schema enum and the
+    /// roster the model reads on both platforms.
+    ///
+    /// They ship because a sub agent's value is largely in what it is told to do, and
+    /// these three shapes are the ones the delegation prompt keeps describing by hand
+    /// ("search the repo and report, do not edit"; "review this change"; "run the tests
+    /// and tell me what happened"). A user can still write their own — and often
+    /// should, for a domain-specific reviewer — but the common three no longer have to
+    /// be typed out from scratch.
+    ///
+    /// Cost: the roster is injected into every turn's system prompt, so each entry is
+    /// name + description (bounded by `SubAgentLimits`) and nothing else — instructions
+    /// go to the child session only, and stay empty here so the user's own wording is
+    /// not second-guessed by a default they did not write.
+    static let scoutId = "builtin.scout"
+    static let scoutName = "Recon Sub Agent"
+    static let scoutDescription =
+        "Read-only reconnaissance: map a codebase, a repository or a set of pages and return a compact "
+        + "brief — where things live, how they connect, and what to read next. Told not to edit."
+
+    static let reviewerId = "builtin.reviewer"
+    static let reviewerName = "Code Review Sub Agent"
+    static let reviewerDescription =
+        "Review a change or a file for correctness, security and test coverage, and report concrete "
+        + "findings with the file and line. Told not to fix: the finding is the deliverable."
+
+    static let testerId = "builtin.tester"
+    static let testerName = "Test Runner Sub Agent"
+    static let testerDescription =
+        "Verify a change by running the project's build and tests in the sandbox, then report the exact "
+        + "command, its output and its exit status — green or red, with the evidence."
+
+    /// Every built-in id, in roster order: the order is the disclosure order, and the
+    /// first entry is what a blank agent name resolves to.
+    static let allBuiltInIds = [builtInId, scoutId, reviewerId, testerId]
+
+    /// Whether `id` belongs to a built-in this build knows.
+    static func isBuiltInId(_ id: String) -> Bool { allBuiltInIds.contains(id) }
+
+    /// The canonical spec for every built-in, in roster order.
+    /// `SubAgentRoster.normalize` starts from this and folds each stored row's
+    /// user-owned fields back in, which is what makes a roster written by an older
+    /// build (only `builtin.general`) gain the new ones instead of losing them forever.
+    static func makeBuiltIns() -> [SubAgentDefinition] {
+        [
+            makeBuiltIn(sortOrder: 0),
+            SubAgentDefinition(id: scoutId, name: scoutName, description: scoutDescription,
+                               isBuiltIn: true, sortOrder: 1),
+            SubAgentDefinition(id: reviewerId, name: reviewerName, description: reviewerDescription,
+                               isBuiltIn: true, sortOrder: 2),
+            SubAgentDefinition(id: testerId, name: testerName, description: testerDescription,
+                               isBuiltIn: true, sortOrder: 3),
+        ]
+    }
+
     /// Its name and description are localized at creation time. They are stored
     /// (not resolved per read) because the name is a user-editable field and the
     /// description is what the model sees — a value that changed under the user
@@ -182,58 +264,72 @@ enum SubAgentRoster {
                           log: ((String) -> Void)? = nil) -> [SubAgentDefinition] {
         var list = input
 
-        // The built-in is pinned to the front regardless of its stored
-        // sortOrder, so a synced roster that reordered it cannot bury it or
-        // cost it its slot in the count bound below.
-        let builtInIndex = list.firstIndex { $0.id == SubAgentDefinition.builtInId }
-        var builtIn: SubAgentDefinition
-        if let idx = builtInIndex {
-            builtIn = list.remove(at: idx)
-            // The built-in's name and description are canonical English (they
-            // are the tool-schema enum and the roster the model reads). Restore
-            // them on every load: a row written before they were fixed carries
-            // whatever the UI language was at the time, and one written by a
-            // device set to another language would otherwise arrive here and
-            // change what the model has to emit. The user's own fields —
-            // model group, instructions, order — are untouched.
-            if builtIn.name != SubAgentDefinition.builtInName
-                || builtIn.description != SubAgentDefinition.builtInDescription {
-                log?("[SubAgents] restoring the built-in's canonical name/description")
-                builtIn.name = SubAgentDefinition.builtInName
-                builtIn.description = SubAgentDefinition.builtInDescription
+        // [T-sub-agent-builtin-roster] Built-ins are matched by ID and taken from the
+        // canonical spec, never from the stored row: their name and description ARE the
+        // tool-schema enum and the roster the model reads, so they must not carry a
+        // store's UI language or a newer build's wording. Spec order pins them to the
+        // front, and a built-in this build has but the stored roster does not (the
+        // upgrade path from a build that shipped only `builtin.general`) is added here
+        // rather than lost.
+        //
+        // Everything the USER owns on a built-in — model group, instructions, thinking
+        // override — is folded back in from the stored row.
+        let storedById = Dictionary(grouping: list, by: \.id)
+        let builtIns: [SubAgentDefinition] = SubAgentDefinition.makeBuiltIns().map { spec in
+            guard let row = storedById[spec.id]?.first else {
+                log?("[SubAgents] built-in '\(spec.id)' missing — reinserting")
+                return spec
             }
-        } else {
-            builtIn = SubAgentDefinition.makeBuiltIn()
-            log?("[SubAgents] built-in definition missing — reinserting")
+            if row.name != spec.name || row.description != spec.description {
+                log?("[SubAgents] restoring the built-in's canonical name/description")
+            }
+            var folded = spec
+            folded.instructions = row.instructions
+            folded.modelGroupId = row.modelGroupId
+            folded.thinkingLevelOverride = row.thinkingLevelOverride
+            folded.updatedAt = row.updatedAt
+            return folded
         }
 
         // Custom entries keep the user's order; ties break by id so the result
         // is deterministic across devices.
-        list.sort { ($0.sortOrder, $0.id) < ($1.sortOrder, $1.id) }
+        var custom = list.filter { !SubAgentDefinition.isBuiltInId($0.id) }
+        custom.sort { ($0.sortOrder, $0.id) < ($1.sortOrder, $1.id) }
 
-        // Drop anything past the bound (the built-in already holds one slot).
-        let allowedCustom = max(0, SubAgentLimits.maxCount - 1)
-        if list.count > allowedCustom {
-            let dropped = list.suffix(from: allowedCustom).map(\.name)
-            log?("[SubAgents] roster over the limit — keeping \(allowedCustom) of \(list.count) custom definitions, dropping: \(dropped.joined(separator: ", "))")
-            list = Array(list.prefix(allowedCustom))
+        // Drop anything past the bound (the built-ins already hold their slots).
+        let allowedCustom = max(0, SubAgentLimits.maxCount - builtIns.count)
+        if custom.count > allowedCustom {
+            let dropped = custom.suffix(from: allowedCustom).map(\.name)
+            log?("[SubAgents] roster over the limit — keeping \(allowedCustom) of \(custom.count) custom definitions, dropping: \(dropped.joined(separator: ", "))")
+            custom = Array(custom.prefix(allowedCustom))
         }
 
-        if builtIn.exceedsLimits || list.contains(where: { $0.exceedsLimits }) {
+        if builtIns.contains(where: { $0.exceedsLimits }) || custom.contains(where: { $0.exceedsLimits }) {
             log?("[SubAgents] one or more definitions exceeded field limits — truncating")
         }
 
-        // A custom definition must not claim the built-in flag: `isBuiltIn`
-        // drives "cannot delete" in the UI, and a synced row could assert it.
-        builtIn = builtIn.clamped()
-        var out: [SubAgentDefinition] = [builtIn]
-        for (i, def) in list.enumerated() {
+        // A custom definition must not claim a built-in identity: `isBuiltIn` drives
+        // "cannot delete" in the UI and the ids are filtered above, so anything left
+        // asserting the flag is an impostor. A nameless row cannot be addressed (the
+        // name IS the enum the model emits), and a name that duplicates one already
+        // in the roster is unreachable because resolution is first-match.
+        var out: [SubAgentDefinition] = builtIns.enumerated().map { index, def in
             var d = def.clamped()
-            if d.isBuiltIn || d.id == SubAgentDefinition.builtInId { continue }
-            d.sortOrder = i + 1
-            out.append(d)
+            d.sortOrder = index
+            return d
         }
-        out[0].sortOrder = 0
+        var seenNames = Set(out.map { nameKey($0.name) })
+        var next = out.count
+        for def in custom {
+            if def.isBuiltIn { continue }
+            if def.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
+            if seenNames.contains(nameKey(def.name)) { continue }
+            seenNames.insert(nameKey(def.name))
+            var d = def.clamped()
+            d.sortOrder = next
+            out.append(d)
+            next += 1
+        }
         return out
     }
 
@@ -308,8 +404,8 @@ enum SubAgentRoster {
             }
             // The built-in outranks any same-named custom record, whichever
             // side it came from and whatever its timestamp says.
-            if held.id == SubAgentDefinition.builtInId { return }
-            if def.id == SubAgentDefinition.builtInId {
+            if SubAgentDefinition.isBuiltInId(held.id) { return }
+            if SubAgentDefinition.isBuiltInId(def.id) {
                 winners[key] = def
                 return
             }

@@ -1915,9 +1915,13 @@
     <string name="agent_tools_ask">Ask user</string>
     <string name="agent_tools_ask_footer">Let the agent ask you a structured multiple-choice question when a choice is genuinely ambiguous (which option you prefer, which direction to take) instead of guessing. The run pauses until you answer or skip.</string>
 
-    <string name="settings_repo_digest">Repository digest</string>
-    <string name="settings_repo_digest_subtitle">GitHub token for the repo_digest tool</string>
     <string name="agent_tools_repo_digest">Repository digest</string>
     <string name="agent_tools_repo_digest_footer">Read a GitHub repository as a digest — file tree plus the contents that matter — in one call, instead of cloning it or browsing page by page. Binary, vendored, minified and lock files are skipped; include/exclude globs narrow it further.</string>
 
+    <string name="sub_agent_builtin_scout_name">정찰 서브 에이전트</string>
+    <string name="sub_agent_builtin_scout_description">읽기 전용 정찰: 코드베이스, 저장소 또는 여러 페이지를 훑어 어디에 무엇이 있고 어떻게 연결되며 다음에 무엇을 읽을지 간결하게 요약합니다. 수정하지 말라고 지시되어 있습니다.</string>
+    <string name="sub_agent_builtin_reviewer_name">코드 리뷰 서브 에이전트</string>
+    <string name="sub_agent_builtin_reviewer_description">변경 사항이나 파일을 정확성, 보안, 테스트 커버리지 관점에서 검토하고 파일과 줄 번호가 포함된 구체적인 지적을 보고합니다. 고치지 말라고 지시되어 있습니다. 지적 자체가 결과물입니다.</string>
+    <string name="sub_agent_builtin_tester_name">테스트 실행 서브 에이전트</string>
+    <string name="sub_agent_builtin_tester_description">샌드박스에서 프로젝트 빌드와 테스트를 실행해 변경을 검증하고, 정확한 명령과 출력, 종료 상태를 보고합니다. 통과든 실패든 근거를 함께 제시합니다.</string>
 </resources>

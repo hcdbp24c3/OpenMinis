@@ -2140,9 +2140,13 @@
     <string name="agent_tools_ask">Ask user</string>
     <string name="agent_tools_ask_footer">Let the agent ask you a structured multiple-choice question when a choice is genuinely ambiguous (which option you prefer, which direction to take) instead of guessing. The run pauses until you answer or skip.</string>
 
-    <string name="settings_repo_digest">Repository digest</string>
-    <string name="settings_repo_digest_subtitle">GitHub token for the repo_digest tool</string>
     <string name="agent_tools_repo_digest">Repository digest</string>
     <string name="agent_tools_repo_digest_footer">Read a GitHub repository as a digest — file tree plus the contents that matter — in one call, instead of cloning it or browsing page by page. Binary, vendored, minified and lock files are skipped; include/exclude globs narrow it further.</string>
 
+    <string name="sub_agent_builtin_scout_name">Podagent za izviđanje</string>
+    <string name="sub_agent_builtin_scout_description">Izviđanje samo za čitanje: pregledava kodnu bazu, repozitorij ili skup stranica i vraća sažetak — gdje se što nalazi, kako je povezano i što dalje čitati. Uputa: ne mijenjaj.</string>
+    <string name="sub_agent_builtin_reviewer_name">Podagent za pregled koda</string>
+    <string name="sub_agent_builtin_reviewer_description">Pregledava promjenu ili datoteku s obzirom na ispravnost, sigurnost i pokrivenost testovima te navodi konkretne nalaze s datotekom i retkom. Uputa: ne ispravljaj — nalaz je rezultat.</string>
+    <string name="sub_agent_builtin_tester_name">Podagent za pokretanje testova</string>
+    <string name="sub_agent_builtin_tester_description">Provjerava promjenu pokretanjem builda i testova projekta u sandboxu te navodi točnu naredbu, njezin izlaz i izlazni status — uspjeh ili neuspjeh, s dokazom.</string>
 </resources>

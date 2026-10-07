@@ -2176,8 +2176,6 @@
     <string name="agent_tools_ask">询问用户</string>
     <string name="agent_tools_ask_footer">当选择确实含糊时（偏好哪个方案、往哪个方向走），允许智能体向你提出结构化的选择题，而不是自行猜测。在你回答或跳过之前，任务会暂停。</string>
 
-    <string name="settings_repo_digest">仓库摘要</string>
-    <string name="settings_repo_digest_subtitle">repo_digest 工具使用的 GitHub 令牌</string>
     <string name="agent_tools_repo_digest">仓库摘要</string>
     <string name="agent_tools_repo_digest_footer">一次调用就把 GitHub 仓库读成摘要 —— 文件树加上关键文件内容，无需克隆或逐页浏览。会自动跳过二进制、依赖目录、压缩产物与 lock 文件；可用 include/exclude glob 进一步收窄。</string>
 
@@ -2223,6 +2221,10 @@
     <string name="git_vault_sync_skipped">%1$d 条凭据还没有密钥</string>
     <string name="git_vault_sync_wildcards">%1$d 个通配符令牌只用于 API 工具 — git 需要精确主机</string>
     <string name="git_vault_sync_no_rootfs">沙箱尚未安装</string>
-    <string name="repo_digest_credentials_header">凭据</string>
-    <string name="repo_digest_credentials_footer">工具会用主机与仓库 URL 匹配的那条凭据认证，因此公司 GitLab 与 gitlab.com 可以各用不同令牌。没有凭据时公开仓库依然可用：每次摘要一次 API 调用（未认证 60 次/小时），文件内容走 raw 主机，不占该配额。</string>
+    <string name="sub_agent_builtin_scout_name">侦察子代理</string>
+    <string name="sub_agent_builtin_scout_description">只读侦察：梳理代码库、仓库或一组网页，返回简明摘要——东西在哪里、彼此如何关联、下一步该读什么。已要求它不要修改。</string>
+    <string name="sub_agent_builtin_reviewer_name">代码审查子代理</string>
+    <string name="sub_agent_builtin_reviewer_description">审查一处改动或一个文件，关注正确性、安全与测试覆盖，并给出带文件与行号的具体发现。已要求它不要动手修：发现本身就是交付物。</string>
+    <string name="sub_agent_builtin_tester_name">测试运行子代理</string>
+    <string name="sub_agent_builtin_tester_description">在沙箱中运行项目的构建与测试来验证改动，然后报告确切的命令、输出与退出码——通过或失败都要给出证据。</string>
 </resources>

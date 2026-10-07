@@ -10766,6 +10766,216 @@
         }
       }
     },
+    "Recon Sub Agent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recon Sub Agent"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Podagent za izviđanje"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "偵察サブエージェント"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "侦察子代理"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "偵察子代理"
+          }
+        }
+      }
+    },
+    "Read-only reconnaissance: map a codebase, a repository or a set of pages and return a compact brief — where things live, how they connect, and what to read next. Told not to edit." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Read-only reconnaissance: map a codebase, a repository or a set of pages and return a compact brief — where things live, how they connect, and what to read next. Told not to edit."
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Izviđanje samo za čitanje: pregledava kodnu bazu, repozitorij ili skup stranica i vraća sažetak — gdje se što nalazi, kako je povezano i što dalje čitati. Uputa: ne mijenjaj."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "読み取り専用の偵察：コードベース、リポジトリ、または一連のページを調査し、どこに何があり、どう繋がり、次に何を読むべきかを簡潔にまとめて返す。編集しないよう指示済み。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只读侦察：梳理代码库、仓库或一组网页，返回简明摘要——东西在哪里、彼此如何关联、下一步该读什么。已要求它不要修改。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "唯讀偵察：梳理程式庫、儲存庫或一組網頁，回傳精簡摘要——東西在哪裡、彼此如何關聯、下一步該讀什麼。已要求它不要修改。"
+          }
+        }
+      }
+    },
+    "Code Review Sub Agent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Code Review Sub Agent"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Podagent za pregled koda"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コードレビューサブエージェント"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "代码审查子代理"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "程式碼審查子代理"
+          }
+        }
+      }
+    },
+    "Review a change or a file for correctness, security and test coverage, and report concrete findings with the file and line. Told not to fix: the finding is the deliverable." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Review a change or a file for correctness, security and test coverage, and report concrete findings with the file and line. Told not to fix: the finding is the deliverable."
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pregledava promjenu ili datoteku s obzirom na ispravnost, sigurnost i pokrivenost testovima te navodi konkretne nalaze s datotekom i retkom. Uputa: ne ispravljaj — nalaz je rezultat."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "変更やファイルを正確さ・安全性・テスト網羅の観点でレビューし、ファイルと行番号を添えた具体的な指摘を返す。修正はしないよう指示済み：指摘そのものが成果物。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "审查一处改动或一个文件，关注正确性、安全与测试覆盖，并给出带文件与行号的具体发现。已要求它不要动手修：发现本身就是交付物。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "審查一處變更或一個檔案，關注正確性、安全與測試覆蓋，並給出帶檔案與行號的具體發現。已要求它不要動手修：發現本身就是交付物。"
+          }
+        }
+      }
+    },
+    "Test Runner Sub Agent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Test Runner Sub Agent"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Podagent za pokretanje testova"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テスト実行サブエージェント"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "测试运行子代理"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "測試執行子代理"
+          }
+        }
+      }
+    },
+    "Verify a change by running the project's build and tests in the sandbox, then report the exact command, its output and its exit status — green or red, with the evidence." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verify a change by running the project's build and tests in the sandbox, then report the exact command, its output and its exit status — green or red, with the evidence."
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Provjerava promjenu pokretanjem builda i testova projekta u sandboxu te navodi točnu naredbu, njezin izlaz i izlazni status — uspjeh ili neuspjeh, s dokazom."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サンドボックスでプロジェクトのビルドとテストを実行して変更を検証し、実行したコマンド、その出力、終了ステータスを正確に報告する。成功でも失敗でも根拠を添えて。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在沙箱中运行项目的构建与测试来验证改动，然后报告确切的命令、输出与退出码——通过或失败都要给出证据。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在沙箱中執行專案的建置與測試來驗證變更，然後回報確切的指令、輸出與結束狀態——通過或失敗都要附上證據。"
+          }
+        }
+      }
+    },
     "Generation stopped" : {
       "extractionState" : "manual",
       "localizations" : {

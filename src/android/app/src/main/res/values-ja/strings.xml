@@ -1954,9 +1954,13 @@
     <string name="agent_tools_ask">Ask user</string>
     <string name="agent_tools_ask_footer">Let the agent ask you a structured multiple-choice question when a choice is genuinely ambiguous (which option you prefer, which direction to take) instead of guessing. The run pauses until you answer or skip.</string>
 
-    <string name="settings_repo_digest">Repository digest</string>
-    <string name="settings_repo_digest_subtitle">GitHub token for the repo_digest tool</string>
     <string name="agent_tools_repo_digest">Repository digest</string>
     <string name="agent_tools_repo_digest_footer">Read a GitHub repository as a digest — file tree plus the contents that matter — in one call, instead of cloning it or browsing page by page. Binary, vendored, minified and lock files are skipped; include/exclude globs narrow it further.</string>
 
+    <string name="sub_agent_builtin_scout_name">偵察サブエージェント</string>
+    <string name="sub_agent_builtin_scout_description">読み取り専用の偵察：コードベース、リポジトリ、または一連のページを調査し、どこに何があり、どう繋がり、次に何を読むべきかを簡潔にまとめて返す。編集しないよう指示済み。</string>
+    <string name="sub_agent_builtin_reviewer_name">コードレビューサブエージェント</string>
+    <string name="sub_agent_builtin_reviewer_description">変更やファイルを正確さ・安全性・テスト網羅の観点でレビューし、ファイルと行番号を添えた具体的な指摘を返す。修正はしないよう指示済み：指摘そのものが成果物。</string>
+    <string name="sub_agent_builtin_tester_name">テスト実行サブエージェント</string>
+    <string name="sub_agent_builtin_tester_description">サンドボックスでプロジェクトのビルドとテストを実行して変更を検証し、実行したコマンド、その出力、終了ステータスを正確に報告する。成功でも失敗でも根拠を添えて。</string>
 </resources>

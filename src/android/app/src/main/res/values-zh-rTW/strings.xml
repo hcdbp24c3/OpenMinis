@@ -2165,9 +2165,13 @@
     <string name="agent_tools_ask">Ask user</string>
     <string name="agent_tools_ask_footer">Let the agent ask you a structured multiple-choice question when a choice is genuinely ambiguous (which option you prefer, which direction to take) instead of guessing. The run pauses until you answer or skip.</string>
 
-    <string name="settings_repo_digest">Repository digest</string>
-    <string name="settings_repo_digest_subtitle">GitHub token for the repo_digest tool</string>
     <string name="agent_tools_repo_digest">Repository digest</string>
     <string name="agent_tools_repo_digest_footer">Read a GitHub repository as a digest — file tree plus the contents that matter — in one call, instead of cloning it or browsing page by page. Binary, vendored, minified and lock files are skipped; include/exclude globs narrow it further.</string>
 
+    <string name="sub_agent_builtin_scout_name">偵察子代理</string>
+    <string name="sub_agent_builtin_scout_description">唯讀偵察：梳理程式庫、儲存庫或一組網頁，回傳精簡摘要——東西在哪裡、彼此如何關聯、下一步該讀什麼。已要求它不要修改。</string>
+    <string name="sub_agent_builtin_reviewer_name">程式碼審查子代理</string>
+    <string name="sub_agent_builtin_reviewer_description">審查一處變更或一個檔案，關注正確性、安全與測試覆蓋，並給出帶檔案與行號的具體發現。已要求它不要動手修：發現本身就是交付物。</string>
+    <string name="sub_agent_builtin_tester_name">測試執行子代理</string>
+    <string name="sub_agent_builtin_tester_description">在沙箱中執行專案的建置與測試來驗證變更，然後回報確切的指令、輸出與結束狀態——通過或失敗都要附上證據。</string>
 </resources>

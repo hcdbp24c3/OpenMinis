@@ -95,18 +95,54 @@ data class SubAgentDefinition(
     var updatedAt: Long = System.currentTimeMillis(),
 ) {
     /**
-     * [T-sub-agents-v1] Localized label for the settings list and editor.
+     * [T-sub-agent-builtin-roster] Localized label for the settings list and editor.
      *
-     * ONLY the built-in has one — a user-created agent is shown exactly as the
-     * user named it. This is presentation only: [name] stays canonical English
-     * because it is the tool-schema enum value the model must emit.
+     * ONLY the built-ins have one — a user-created agent is shown exactly as the user
+     * named it. This is presentation only: [name] stays canonical English because it is
+     * the tool-schema enum value the model must emit, and a device set to another
+     * language must not change what the model has to say.
      */
-    fun displayName(context: android.content.Context): String =
-        if (isBuiltIn) context.getString(com.openminis.app.R.string.sub_agent_builtin_name) else name
+    fun displayName(context: android.content.Context): String {
+        val res = builtInLabelRes(name, description = false) ?: return name
+        return context.getString(res)
+    }
 
     /** Localized description for the settings screen, mirroring [displayName]. */
-    fun displayDescription(context: android.content.Context): String =
-        if (isBuiltIn) context.getString(com.openminis.app.R.string.sub_agent_builtin_description) else description
+    fun displayDescription(context: android.content.Context): String {
+        val res = builtInLabelRes(name, description = true) ?: return description
+        return context.getString(res)
+    }
+
+    /**
+     * Label resource for a built-in, keyed by its canonical English [name] — the same
+     * rule iOS uses (`isBuiltIn ? AppLocalized(<canonical name>) : name`). Null for a
+     * user-created agent, or for a built-in this build does not know (a roster synced
+     * from a newer one): both fall back to the stored text.
+     */
+    private fun builtInLabelRes(name: String, description: Boolean): Int? =
+        when (name) {
+            BUILT_IN_NAME -> if (description) {
+                com.openminis.app.R.string.sub_agent_builtin_description
+            } else {
+                com.openminis.app.R.string.sub_agent_builtin_name
+            }
+            SCOUT_NAME -> if (description) {
+                com.openminis.app.R.string.sub_agent_builtin_scout_description
+            } else {
+                com.openminis.app.R.string.sub_agent_builtin_scout_name
+            }
+            REVIEWER_NAME -> if (description) {
+                com.openminis.app.R.string.sub_agent_builtin_reviewer_description
+            } else {
+                com.openminis.app.R.string.sub_agent_builtin_reviewer_name
+            }
+            TESTER_NAME -> if (description) {
+                com.openminis.app.R.string.sub_agent_builtin_tester_description
+            } else {
+                com.openminis.app.R.string.sub_agent_builtin_tester_name
+            }
+            else -> null
+        }
 
     /**
      * Field-level clamp applied on load and on save.
@@ -151,7 +187,55 @@ data class SubAgentDefinition(
             "Open-ended work that needs its own tool loop: exploring a codebase or the web over many rounds, " +
                 "digesting bulk output into a conclusion, or running independent branches in parallel."
 
-        /** The built-in general sub agent, inserted by normalize when absent. */
+        /**
+         * [T-sub-agent-builtin-roster] Three more built-ins beside the general one,
+         * one per SHAPE of delegated work: find, judge, verify.
+         *
+         * They ship because a sub agent's value is largely in what it is told to do,
+         * and the three shapes below are the ones the delegation prompt keeps
+         * describing by hand ("search the repo and report, do not edit"; "review this
+         * change"; "run the tests and tell me what happened"). A user can still write
+         * their own — and often should, for a domain-specific reviewer — but the
+         * common three no longer have to be typed out from scratch.
+         *
+         * Cost: the roster is injected into every turn's system prompt, so each entry
+         * is name + description (bounded by [SubAgentLimits]) and nothing else —
+         * instructions go to the child session only, and stay empty here so the user's
+         * own wording is not being second-guessed by a default they did not write.
+         */
+        const val SCOUT_ID = "builtin.scout"
+        const val SCOUT_NAME = "Recon Sub Agent"
+        const val SCOUT_DESCRIPTION =
+            "Read-only reconnaissance: map a codebase, a repository or a set of pages and return a compact " +
+                "brief — where things live, how they connect, and what to read next. Told not to edit."
+
+        const val REVIEWER_ID = "builtin.reviewer"
+        const val REVIEWER_NAME = "Code Review Sub Agent"
+        const val REVIEWER_DESCRIPTION =
+            "Review a change or a file for correctness, security and test coverage, and report concrete " +
+                "findings with the file and line. Told not to fix: the finding is the deliverable."
+
+        const val TESTER_ID = "builtin.tester"
+        const val TESTER_NAME = "Test Runner Sub Agent"
+        const val TESTER_DESCRIPTION =
+            "Verify a change by running the project's build and tests in the sandbox, then report the exact " +
+                "command, its output and its exit status — green or red, with the evidence."
+
+        /**
+         * Every built-in id, in roster order. The order is the disclosure order, and
+         * the first entry is what a blank agent name resolves to.
+         */
+        val BUILT_IN_IDS = listOf(BUILT_IN_ID, SCOUT_ID, REVIEWER_ID, TESTER_ID)
+
+        /** Whether [id] belongs to a built-in this build knows. */
+        fun isBuiltInId(id: String): Boolean = id in BUILT_IN_IDS
+
+        /**
+         * The built-in general sub agent, inserted by normalize when absent.
+         *
+         * Kept separate from [makeBuiltIns] because `BUILT_IN_ID` is long-standing
+         * stored data and several call sites name it directly.
+         */
         fun makeBuiltIn(sortOrder: Int = 0): SubAgentDefinition = SubAgentDefinition(
             id = BUILT_IN_ID,
             name = BUILT_IN_NAME,
@@ -160,6 +244,37 @@ data class SubAgentDefinition(
             modelGroupId = null,
             isBuiltIn = true,
             sortOrder = sortOrder,
+        )
+
+        /**
+         * The canonical spec for every built-in, in roster order. [SubAgentRoster.normalize]
+         * starts from this list and folds each stored row's user-owned fields back in,
+         * which is what makes a roster written by an older build (only
+         * [BUILT_IN_ID]) gain the new ones instead of losing them forever.
+         */
+        fun makeBuiltIns(): List<SubAgentDefinition> = listOf(
+            makeBuiltIn(sortOrder = 0),
+            SubAgentDefinition(
+                id = SCOUT_ID,
+                name = SCOUT_NAME,
+                description = SCOUT_DESCRIPTION,
+                isBuiltIn = true,
+                sortOrder = 1,
+            ),
+            SubAgentDefinition(
+                id = REVIEWER_ID,
+                name = REVIEWER_NAME,
+                description = REVIEWER_DESCRIPTION,
+                isBuiltIn = true,
+                sortOrder = 2,
+            ),
+            SubAgentDefinition(
+                id = TESTER_ID,
+                name = TESTER_NAME,
+                description = TESTER_DESCRIPTION,
+                isBuiltIn = true,
+                sortOrder = 3,
+            ),
         )
     }
 }
@@ -188,41 +303,43 @@ object SubAgentRoster {
     ): List<SubAgentDefinition> {
         val list = input.toMutableList()
 
-        // The built-in is pinned to the front regardless of its stored
-        // sortOrder, so a synced roster that reordered it cannot bury it or
-        // cost it its slot in the count bound below.
-        val builtInIndex = list.indexOfFirst { it.id == SubAgentDefinition.BUILT_IN_ID }
-        var builtIn: SubAgentDefinition
-        if (builtInIndex >= 0) {
-            builtIn = list.removeAt(builtInIndex)
-            // The built-in's name and description are canonical English (they
-            // are the tool-schema enum and the roster the model reads). Restore
-            // them on every load: a row written before they were fixed carries
-            // whatever the UI language was at the time, and one written by a
-            // device set to another language would otherwise arrive here and
-            // change what the model has to emit. The user's own fields — model
-            // group, instructions, order — are untouched.
-            if (builtIn.name != SubAgentDefinition.BUILT_IN_NAME ||
-                builtIn.description != SubAgentDefinition.BUILT_IN_DESCRIPTION
-            ) {
-                log?.invoke("[SubAgents] restoring the built-in's canonical name/description")
-                builtIn = builtIn.copy(
-                    name = SubAgentDefinition.BUILT_IN_NAME,
-                    description = SubAgentDefinition.BUILT_IN_DESCRIPTION,
+        // [T-sub-agent-builtin-roster] Built-ins are matched by ID and taken from the
+        // canonical spec, never from the stored row: their name and description ARE the
+        // tool-schema enum and the roster the model reads, so they must not carry a
+        // store's UI language or a newer build's wording. Spec order pins them to the
+        // front, and a built-in this build has but the stored roster does not (the
+        // upgrade path from a build that shipped only `builtin.general`) is added here
+        // rather than lost.
+        //
+        // Everything the USER owns on a built-in — model group, instructions, thinking
+        // override — is folded back in from the stored row.
+        val byId = list.groupBy { it.id }
+        val builtIns = SubAgentDefinition.makeBuiltIns().map { spec ->
+            val row = byId[spec.id]?.firstOrNull()
+            if (row == null) {
+                log?.invoke("[SubAgents] built-in '${spec.id}' missing — reinserting")
+                spec
+            } else {
+                if (row.name != spec.name || row.description != spec.description) {
+                    log?.invoke("[SubAgents] restoring the built-in's canonical name/description")
+                }
+                spec.copy(
+                    instructions = row.instructions,
+                    modelGroupId = row.modelGroupId,
+                    thinkingLevelOverride = row.thinkingLevelOverride,
+                    updatedAt = row.updatedAt,
                 )
             }
-        } else {
-            builtIn = SubAgentDefinition.makeBuiltIn()
-            log?.invoke("[SubAgents] built-in definition missing — reinserting")
         }
 
         // Custom entries keep the user's order; ties break by id so the result
         // is deterministic across devices.
-        list.sortWith(compareBy({ it.sortOrder }, { it.id }))
+        var custom: List<SubAgentDefinition> =
+            list.filterNot { SubAgentDefinition.isBuiltInId(it.id) }
+        custom = custom.sortedWith(compareBy({ it.sortOrder }, { it.id }))
 
-        // Drop anything past the bound (the built-in already holds one slot).
-        val allowedCustom = maxOf(0, SubAgentLimits.MAX_COUNT - 1)
-        var custom: List<SubAgentDefinition> = list
+        // Drop anything past the bound (the built-ins already hold their slots).
+        val allowedCustom = maxOf(0, SubAgentLimits.MAX_COUNT - builtIns.size)
         if (custom.size > allowedCustom) {
             val dropped = custom.drop(allowedCustom).map { it.name }
             log?.invoke(
@@ -232,18 +349,19 @@ object SubAgentRoster {
             custom = custom.take(allowedCustom)
         }
 
-        if (builtIn.exceedsLimits || custom.any { it.exceedsLimits }) {
+        if (builtIns.any { it.exceedsLimits } || custom.any { it.exceedsLimits }) {
             log?.invoke("[SubAgents] one or more definitions exceeded field limits — truncating")
         }
 
-        val out = mutableListOf(builtIn.clamped().copy(sortOrder = 0))
-        val seenNames = mutableSetOf(nameKey(builtIn.name))
-        var next = 1
+        val out = builtIns.mapIndexed { index, def -> def.clamped().copy(sortOrder = index) }.toMutableList()
+        val seenNames = out.map { nameKey(it.name) }.toMutableSet()
+        var next = out.size
         for (def in custom) {
             // A custom definition must not claim the built-in flag: isBuiltIn
             // drives "cannot delete" in the UI, and a synced row could assert
-            // it. Same for stealing the built-in's id.
-            if (def.isBuiltIn || def.id == SubAgentDefinition.BUILT_IN_ID) continue
+            // it. Its id cannot be a built-in one either — those were filtered
+            // out above, so anything left asserting the flag is an impostor.
+            if (def.isBuiltIn) continue
             // A nameless definition cannot be addressed: the name IS the enum
             // value the model emits and the key resolve() matches on. Left in,
             // it would advertise an empty string in the tool schema and put a
@@ -252,9 +370,9 @@ object SubAgentRoster {
             // state of a row the user backed out of, not a corrupt one.
             if (def.name.isBlank()) continue
             // Two rows sharing a name make resolution ambiguous — first match
-            // wins and the user cannot see why the other never runs.
-            if (seenNames.contains(nameKey(def.name))) continue
-            seenNames.add(nameKey(def.name))
+            // wins and the user cannot see why the other never runs. Seeded with
+            // the built-in names, so a custom "Recon Sub Agent" is dropped too.
+            if (!seenNames.add(nameKey(def.name))) continue
             out.add(def.clamped().copy(sortOrder = next))
             next += 1
         }
@@ -318,7 +436,7 @@ object SubAgentRoster {
         var written = 0
         var skipped = 0
         for (r in incoming) {
-            if (r.isBuiltIn || r.id == SubAgentDefinition.BUILT_IN_ID) { skipped++; continue }
+            if (r.isBuiltIn || SubAgentDefinition.isBuiltInId(r.id)) { skipped++; continue }
             val at = out.indexOfFirst { it.id == r.id }
             if (at >= 0) {
                 if (r.updatedAt > out[at].updatedAt) { out[at] = r.copy(isBuiltIn = false); written++ } else skipped++

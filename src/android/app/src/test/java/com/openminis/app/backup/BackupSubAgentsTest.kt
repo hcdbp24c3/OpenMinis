@@ -99,7 +99,10 @@ class BackupSubAgentsTest {
         val local = listOf(builtIn, def("a", "alpha"))
         val m = SubAgentRoster.mergeBackup(local, listOf(def("b", "beta")))
         assertEquals(1, m.written); assertEquals(0, m.skipped)
-        assertEquals(setOf(SubAgentDefinition.BUILT_IN_ID, "a", "b"), m.roster.map { it.id }.toSet())
+        assertEquals(
+            SubAgentDefinition.BUILT_IN_IDS.toSet() + setOf("a", "b"),
+            m.roster.map { it.id }.toSet(),
+        )
     }
 
     @Test
@@ -127,7 +130,9 @@ class BackupSubAgentsTest {
         val local = listOf(builtIn, def("a", "alpha", updatedAt = 5_000))
         val m = SubAgentRoster.mergeBackup(local, listOf(def("a", "alpha", updatedAt = 5_000)))
         assertEquals(0, m.written)
-        assertEquals(2, m.roster.size)
+        // The built-ins are re-seeded by normalize, so "not doubled" means the one
+        // custom row plus every built-in — not a bare 2.
+        assertEquals(SubAgentDefinition.BUILT_IN_IDS.size + 1, m.roster.size)
     }
 
     @Test
