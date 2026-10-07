@@ -114,6 +114,17 @@ class SelectionCopyScopeTest {
     }
 
     @Test
+    fun `the block count is what a label can afford`() {
+        // Two blocks in one message: the row shows Copy (the answer) and Copy All.
+        val items = listOf(
+            mdRow(msg, "b1", 0, "narration"),
+            mdRow(msg, "b2", 0, "the answer"),
+            mdRow("other", "c1", 0, "one block"),
+        )
+        assertEquals(mapOf(msg to 2, "other" to 1), textBlockCountPerMessage(items))
+    }
+
+    @Test
     fun `a tool-only turn has no answer to prefer`() {
         // The caller falls back to the whole turn, so the action still copies something.
         // A tool or thinking block is not an answer, even when it arrives as a text row.

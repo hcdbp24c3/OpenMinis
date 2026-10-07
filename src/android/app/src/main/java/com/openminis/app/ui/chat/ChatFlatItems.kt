@@ -984,65 +984,81 @@ internal fun buildFlatChatItems(
 }
 
 /**
- * [T-android-copy-answer-scope] The text of each message's LAST text block, keyed by
- * message id — what a message-level Copy takes when nothing is selected.
+ * [T-android-copy-answer-scope] Text rows grouped into their BLOCKS, per message.
  *
- * Not "the last row on screen". An assistant text block is split into rendering
- * fragments (`splitMarkdownIntoBlockTexts`), each becoming its own row, so the last row
- * of an ordinary multi-paragraph reply is its last PARAGRAPH: copying that would be a
- * silent regression for every reply that is not an agent turn. The fragments of one
- * block share `parentBlockId`, so grouping by it and taking the last group in document
- * order recovers exactly the last block.
+ * An assistant text block is split into rendering fragments (`splitMarkdownIntoBlockTexts`),
+ * each becoming its own row, so "the last text" of a message is not its last row: on an
+ * ordinary multi-paragraph reply that is only the last paragraph. Fragments of one block
+ * share `parentBlockId`, which is what makes the block recoverable.
  *
- * And not "the whole message" either: an agent turn is narration, tool calls, then the
- * answer, and the answer is what a copy under the reply should hand back.
- *
- * A message with no text row at all (tool-only) is absent from the map, which the caller
- * reads as "fall back to the whole turn".
+ * The two functions below are the same walk with different costs on purpose — see each.
  */
-internal fun lastTextBlockPerMessage(
+private fun textBlockGroups(
     items: List<FlatChatItem>,
-    /**
-     * Maps a row's message id to the owning message. The caller passes its own
-     * `originalMessageId` because a row can belong to a *merged* message (the grouping
-     * feature folds several ids under one heading) and the roster of ids lives in the
-     * composition, not here.
-     */
-    idOf: (String) -> String = { it },
-): Map<String, String> {
-    val groups = LinkedHashMap<String, MutableList<String>>()
+    idOf: (String) -> String,
+): LinkedHashMap<String, LinkedHashMap<String, MutableList<String>>> {
+    val byMessage = LinkedHashMap<String, LinkedHashMap<String, MutableList<String>>>()
     for (flat in items) {
-        val key = when (flat) {
-            is FlatChatItem.AssistantMarkdownBlock ->
-                idOf(flat.messageId) + BLOCK_GROUP_SEPARATOR + flat.parentBlockId
-            // Guarded by kind: tool_use and thinking blocks render as pills/rows of their
-            // own, and an "answer" made of a tool's JSON args would be nonsense.
-            is FlatChatItem.AssistantText ->
-                if (flat.block.kind == "text") {
-                    idOf(flat.messageId) + BLOCK_GROUP_SEPARATOR + flat.block.id
-                } else {
-                    null
-                }
-            is FlatChatItem.AssistantLegacyContent ->
-                idOf(flat.messageId) + BLOCK_GROUP_SEPARATOR + "legacy"
+        val msg = when (flat) {
+            is FlatChatItem.AssistantMarkdownBlock -> idOf(flat.messageId)
+            is FlatChatItem.AssistantText -> if (flat.block.kind == "text") idOf(flat.messageId) else null
+            is FlatChatItem.AssistantLegacyContent -> idOf(flat.messageId)
             else -> null
         } ?: continue
+        // Guarded by kind: tool_use and thinking blocks render as pills/rows of their own,
+        // and an "answer" made of a tool's JSON args would be nonsense.
+        val group = when (flat) {
+            is FlatChatItem.AssistantMarkdownBlock -> flat.parentBlockId
+            is FlatChatItem.AssistantText -> flat.block.id
+            is FlatChatItem.AssistantLegacyContent -> "legacy"
+            else -> continue
+        }
         val text = when (flat) {
             is FlatChatItem.AssistantMarkdownBlock -> flat.rawText
             is FlatChatItem.AssistantText -> flat.block.content
             is FlatChatItem.AssistantLegacyContent -> flat.content
-            else -> null
-        } ?: continue
+            else -> continue
+        }
         if (text.isEmpty()) continue
-        groups.getOrPut(key) { mutableListOf() }.add(text)
+        byMessage.getOrPut(msg) { LinkedHashMap() }.getOrPut(group) { mutableListOf() }.add(text)
     }
-    // Insertion order is document order, so the last group written for a message wins.
+    return byMessage
+}
+
+/**
+ * [T-android-copy-answer-scope] How many text BLOCKS each message has.
+ *
+ * What a per-row label may compute on every frame: it counts, it does not concatenate.
+ * A message with one block has nothing to choose between, so the row shows a single Copy
+ * action; two or more is an agent turn — narration, tool calls, answer — where "the
+ * answer" is a different thing from the whole turn.
+ */
+internal fun textBlockCountPerMessage(
+    items: List<FlatChatItem>,
+    idOf: (String) -> String = { it },
+): Map<String, Int> = textBlockGroups(items, idOf).mapValues { (_, groups) -> groups.size }
+
+/**
+ * [T-android-copy-answer-scope] The text of each message's LAST text block — the answer a
+ * message-level Copy takes when nothing is selected.
+ *
+ * Called when the button is pressed, not during composition: it joins every fragment of
+ * the block it returns, and doing that per frame (or per streaming token, since the row
+ * list is rebuilt on each one) is allocation the UI does not need. Documents are small and
+ * a tap is rare; a frame is neither.
+ *
+ * A message with no text row is absent from the map, which the caller reads as "fall back
+ * to the whole turn".
+ */
+internal fun lastTextBlockPerMessage(
+    items: List<FlatChatItem>,
+    idOf: (String) -> String = { it },
+): Map<String, String> {
     val out = LinkedHashMap<String, String>()
-    for ((key, fragments) in groups) {
-        out[key.substringBefore(BLOCK_GROUP_SEPARATOR)] = fragments.joinToString("")
+    for ((msg, groups) in textBlockGroups(items, idOf)) {
+        // Insertion order is document order, so the last group is the last block.
+        val last = groups.entries.lastOrNull() ?: continue
+        out[msg] = last.value.joinToString("")
     }
     return out
 }
-
-/** NUL cannot occur in a shard or block id, so it cannot collide here. */
-private const val BLOCK_GROUP_SEPARATOR = "\u0000"
