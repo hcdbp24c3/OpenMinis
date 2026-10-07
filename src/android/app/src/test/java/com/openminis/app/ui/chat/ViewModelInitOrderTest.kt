@@ -1,8 +1,9 @@
 package com.openminis.app.ui.chat
 
+import java.io.File
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.File
 
 /**
  * [T-android-recentlyfailed-init-order] Every property `loadSession()` reads
@@ -30,28 +31,20 @@ import java.io.File
  * where it is, and the compiler is silent because the type is non-null on
  * paper. Only the ORDER is wrong. So the guard is a source scan: it is the one
  * check that can see what a runtime test of a correctly-ordered file cannot.
+ *
+ * The scan itself lives in [ChatViewModelInitOrderScan]; the synthetic-source
+ * tests at the bottom pin its rules, because the first version matched a name
+ * anywhere in the load path and reported three non-reads (`Log.w(…`, and prose
+ * inside a string literal and a comment) instead of the real thing.
  */
 class ViewModelInitOrderTest {
+
+    private val loadPathFunctions = listOf("loadSession", "resolveProviderFromGroup", "applyGroupSessionDefaults")
 
     private fun source(): List<String> {
         val f = File("src/main/java/com/openminis/app/ui/chat/ChatViewModel.kt")
         assertTrue("ChatViewModel.kt not found (cwd=${File(".").absolutePath})", f.isFile)
         return f.readLines()
-    }
-
-    /** Line number (1-based) of the class-body `init {`, which runs loadSession(). */
-    private fun initLine(lines: List<String>): Int {
-        val idx = lines.indexOfFirst { it.trimEnd() == "    init {" }
-        assertTrue("no class-body `init {` found in ChatViewModel", idx >= 0)
-        return idx + 1
-    }
-
-    private fun declarationLine(lines: List<String>, name: String): Int {
-        val idx = lines.indexOfFirst {
-            Regex("""^\s*(?:private |internal )?(?:val|var)\s+$name\b""").containsMatchIn(it)
-        }
-        assertTrue("property `$name` not found in ChatViewModel", idx >= 0)
-        return idx + 1
     }
 
     @Test
@@ -60,8 +53,10 @@ class ViewModelInitOrderTest {
         // `it.id !in recentlyFailedEntryIds`, on the synchronous stretch of
         // loadSession().
         val lines = source()
-        val decl = declarationLine(lines, "recentlyFailedEntryIds")
-        val init = initLine(lines)
+        val decl = ChatViewModelInitOrderScan.declarationLine(lines, "recentlyFailedEntryIds")
+        val init = ChatViewModelInitOrderScan.initLine(lines)
+        assertTrue("recentlyFailedEntryIds not found in ChatViewModel", decl > 0)
+        assertTrue("no class-body `init {` found in ChatViewModel", init > 0)
         assertTrue(
             "recentlyFailedEntryIds is declared at line $decl, BELOW `init` at line $init — " +
                 "loadSession() reads it synchronously, so it will be null and the " +
@@ -77,42 +72,16 @@ class ViewModelInitOrderTest {
         // this list derived from the source rather than hard-coded means a new
         // field added to that path is covered without anyone remembering to.
         val lines = source()
-        val init = initLine(lines)
-        val text = lines.joinToString("\n")
+        val init = ChatViewModelInitOrderScan.initLine(lines)
+        assertTrue("no class-body `init {` found in ChatViewModel", init > 0)
 
-        val scope = buildString {
-            for (fn in listOf("loadSession", "resolveProviderFromGroup", "applyGroupSessionDefaults")) {
-                val m = Regex("""\n\s*(?:private |internal )?(?:suspend )?fun $fn\(""").find(text)
-                if (m != null) {
-                    var depth = 0
-                    var i = text.indexOf('{', m.range.first)
-                    val start = i
-                    while (i < text.length) {
-                        if (text[i] == '{') depth++
-                        else if (text[i] == '}') { depth--; if (depth == 0) break }
-                        i++
-                    }
-                    append(text.substring(start, minOf(i + 1, text.length)))
-                }
-            }
-        }
+        // The scan no longer rejects a short scope on its own (synthetic sources in the
+        // tests below are short by design), so assert here that the extraction found the
+        // real load path: an empty scope would silently report "no offenders".
+        val scope = ChatViewModelInitOrderScan.readPathScope(lines.joinToString("\n"), loadPathFunctions)
         assertTrue("could not extract the load path from the source", scope.length > 200)
 
-        // Class-body properties declared after `init` with a plain initialiser.
-        // `by lazy` is exempt: it resolves on first read, not in declaration
-        // order, which is exactly the hazard being tested for.
-        val offenders = mutableListOf<String>()
-        for ((i, line) in lines.withIndex()) {
-            val lineNo = i + 1
-            if (lineNo <= init) continue
-            val m = Regex("""^    (?:private |internal )?(?:val|var) (\w+)\s*(?::[^=]+)?=""")
-                .find(line) ?: continue
-            if ("by lazy" in line) continue
-            val name = m.groupValues[1]
-            if (Regex("""\b$name\b""").containsMatchIn(scope)) {
-                offenders.add("$name (line $lineNo)")
-            }
-        }
+        val offenders = ChatViewModelInitOrderScan.offenders(lines, loadPathFunctions)
 
         assertTrue(
             "these properties are declared BELOW `init` (line $init) yet are read on " +
@@ -120,5 +89,102 @@ class ViewModelInitOrderTest {
                 "constructor runs: $offenders",
             offenders.isEmpty(),
         )
+    }
+
+    // ── the scan's own rules, on synthetic sources ───────────────────────────
+    //
+    // Without these, "the scan finds nothing" is indistinguishable from "the scan
+    // is blind" — and the three false positives it used to report are exactly the
+    // shapes these tests pin.
+
+    /** A synthetic file with [propertyLines] (already 4-space indented) below `init`. */
+    private fun synth(propertyLines: String, loadPath: String): List<String> = buildString {
+        appendLine("class T {")
+        appendLine("    private val first = 1")
+        appendLine("    init {")
+        appendLine("        loadSession()")
+        appendLine("    }")
+        appendLine(propertyLines)
+        appendLine("}")
+        appendLine("fun loadSession() {")
+        appendLine(loadPath)
+        appendLine("}")
+    }.lines()
+
+    private fun offendersOf(propertyLines: String, loadPath: String): List<String> =
+        ChatViewModelInitOrderScan.offenders(synth(propertyLines, loadPath), listOf("loadSession"))
+
+    @Test
+    fun `a bare read below init is reported`() {
+        val offenders = offendersOf(
+            propertyLines = "    private val needed = setOf(1)",
+            loadPath = "foo(needed)",
+        )
+        assertEquals(listOf("needed (line 6)"), offenders)
+    }
+
+    @Test
+    fun `a member access, a string and a comment are not reads`() {
+        // The three non-reads that made the old scan unusable: Log.w(TAG, …), a
+        // "threshold=…" log message, and the English word "line" in a comment.
+        val offenders = offendersOf(
+            propertyLines = """
+                private val w = 1
+                private val threshold = 2
+                private val line = 3
+            """.trimIndent().lines().joinToString("\n") { "    $it" },
+            loadPath = """
+                Log.w(TAG, "count=12 threshold=${'$'}{other}")
+                // fire a line for a threshold crossed hours ago
+            """.trimIndent(),
+        )
+        assertEquals(emptyList<String>(), offenders)
+    }
+
+    @Test
+    fun `an interpolation inside a string is a read`() {
+        // `"${'$'}{needed}"` is a genuine read of the field; dropping the whole literal
+        // would hide it.
+        val offenders = offendersOf(
+            propertyLines = "    private val needed = setOf(1)",
+            loadPath = """Log.d(TAG, "ids=${'$'}{needed}")""",
+        )
+        assertEquals(listOf("needed (line 6)"), offenders)
+    }
+
+    @Test
+    fun `a name that is also a local in the scope is skipped`() {
+        // Conservative by design: a same-named local makes every occurrence
+        // ambiguous, and a missed offence is the better failure for a guard whose
+        // false alarms are what make it deletable.
+        val offenders = offendersOf(
+            propertyLines = "    private val needed = setOf(1)",
+            loadPath = "val needed = compute()\nfoo(needed)",
+        )
+        assertEquals(emptyList<String>(), offenders)
+    }
+
+    @Test
+    fun `a property declared above init is never reported`() {
+        val lines = buildString {
+            appendLine("class T {")
+            appendLine("    private val needed = setOf(1)")
+            appendLine("    init {")
+            appendLine("        loadSession()")
+            appendLine("    }")
+            appendLine("}")
+            appendLine("fun loadSession() {")
+            appendLine("    foo(needed)")
+            appendLine("}")
+        }.lines()
+        assertEquals(emptyList<String>(), ChatViewModelInitOrderScan.offenders(lines, listOf("loadSession")))
+    }
+
+    @Test
+    fun `lazy properties are exempt because they resolve on first read`() {
+        // The real file's head does exactly this, and it is correct: a `by lazy` field
+        // resolves when first read, so its position in the class body is irrelevant.
+        val lines = synth("    private val needed by lazy { setOf(1) }", "foo(needed)")
+        assertEquals(emptyList<String>(), ChatViewModelInitOrderScan.offenders(lines, listOf("loadSession")))
     }
 }
