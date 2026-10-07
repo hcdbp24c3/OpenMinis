@@ -36,6 +36,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Compress
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.VerticalAlignTop
@@ -4010,6 +4013,31 @@ fun ChatScreen(
                     is FlatChatItem.AssistantUsage -> grayedMap[originalMessageId(messageId)] == true
                     is FlatChatItem.AssistantLegacyContent -> grayedMap[originalMessageId(messageId)] == true
                 }
+                // [T-android-message-actions] messageId -> the turn's full markdown,
+                // for the copy action under a finished reply. Taken from the flat items
+                // because that is exactly what is on screen (each text item carries the
+                // message's joined markdown), and built once per list rather than per row.
+                val assistantTurnText = remember(flatItems) {
+                    flatItems.mapNotNull { flat ->
+                        when (flat) {
+                            is FlatChatItem.AssistantText ->
+                                originalMessageId(flat.messageId) to flat.messageMarkdown
+                            is FlatChatItem.AssistantMarkdownBlock ->
+                                originalMessageId(flat.messageId) to flat.messageMarkdown
+                            is FlatChatItem.AssistantLegacyContent ->
+                                originalMessageId(flat.messageId) to flat.messageMarkdown
+                            else -> null
+                        }
+                    }.toMap()
+                }
+                val lastAssistantMessageId = remember(messages) {
+                    messages.lastOrNull { it.role == "assistant" }?.id
+                }
+                // One clipboard path for both the long-press menu and the quick row.
+                val copyMessageText: (String) -> Unit = { text ->
+                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("message", text))
+                }
                 // SelectionContainer must wrap the WHOLE LazyColumn — placing
                 // it per-item breaks long-press because items get disposed
                 // when scrolled out and the selection registrar/detector goes
@@ -4408,37 +4436,52 @@ fun ChatScreen(
                                 // bubble shows its own action menu (Copy /
                                 // Retry / Edit) instead of starting text
                                 // selection, matching iOS UX.
+                                // [T-android-message-actions] The same actions the
+                                // long-press menu offers, hoisted so the quick row under
+                                // the bubble and the menu cannot drift apart.
+                                val copyUserMessage: () -> Unit = { copyMessageText(item.message.content) }
+                                val retryUserMessage: (() -> Unit)? = if (isStreaming) null else ({
+                                    coroutineScope.launch {
+                                        tracedScrollToItem("RETRY-FROM-MSG", 0, 0)
+                                    }
+                                    safeMutate { viewModel.retryFromMessage(item.message.id) }
+                                })
+                                val deleteUserMessageFromHere: (() -> Unit)? = if (isStreaming) null else ({
+                                    deleteFromHereTargetId = item.message.id
+                                })
+                                val editUserMessage: (() -> Unit)? =
+                                    if (isStreaming || item.message.isQueued) null else ({
+                                        val prefill = viewModel.editMessage(item.message.id)
+                                        if (prefill != null) {
+                                            viewModel.setInputText(prefill)
+                                            coroutineScope.launch {
+                                                tracedScrollToItem("EDIT-MSG", 0, 0)
+                                            }
+                                            inputFocusRequester.requestFocus()
+                                        }
+                                    })
+                                Column(modifier = Modifier.fillMaxWidth()) {
                                 UserMessageBubble(
                                 message = item.message,
                                 // [T-android-candidate-bubble-gap] extra top
                                 // gap when this bubble directly follows another
                                 // user bubble (back-to-back candidate sends).
                                 precededByUser = item.precededByUser,
-                                onCopy = {
-                                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("message", item.message.content))
-                                },
+                                onCopy = copyUserMessage,
                                 // T119: pass null while a turn is in flight so
                                 // the long-press menu hides Retry; once the
                                 // stream stops (cancel or natural end) the
                                 // option reappears. Gating execution alone
                                 // wasn't enough — users still saw a tappable
                                 // Retry that silently no-op'd.
-                                onRetry = if (isStreaming) null else ({
-                                    coroutineScope.launch {
-                                        tracedScrollToItem("RETRY-FROM-MSG", 0, 0)
-                                    }
-                                    safeMutate { viewModel.retryFromMessage(item.message.id) }
-                                }),
+                                onRetry = retryUserMessage,
                                 // [T-android-delete-from-here] Gated while
                                 // streaming for the same reason as Retry:
                                 // truncating rows under a live agent loop
                                 // leaves agentHistory describing messages that
                                 // no longer exist. Opens a confirmation rather
                                 // than cutting straight away — there is no undo.
-                                onDeleteFromHere = if (isStreaming) null else ({
-                                    deleteFromHereTargetId = item.message.id
-                                }),
+                                onDeleteFromHere = deleteUserMessageFromHere,
                                 // [T-android-compact-above] iOS parity: long-press
                                 // a user bubble to summarize everything above it.
                                 // Gated on isStreaming like the actions above —
@@ -4452,16 +4495,7 @@ fun ChatScreen(
                                 // from this turn (inclusive) before persisting
                                 // the edited content. Gated on isStreaming the
                                 // same way Retry is.
-                                onEdit = if (isStreaming || item.message.isQueued) null else ({
-                                    val prefill = viewModel.editMessage(item.message.id)
-                                    if (prefill != null) {
-                                        viewModel.setInputText(prefill)
-                                        coroutineScope.launch {
-                                            tracedScrollToItem("EDIT-MSG", 0, 0)
-                                        }
-                                        inputFocusRequester.requestFocus()
-                                    }
-                                }),
+                                onEdit = editUserMessage,
                                 onWithdraw = if (item.message.isQueued) {
                                     { safeMutate { viewModel.withdrawQueuedMessage(item.message.id) } }
                                 } else null,
@@ -4486,6 +4520,18 @@ fun ChatScreen(
                                     }
                                 },
                             )
+                                // Gated entries vanish while streaming (see the
+                                // hoisted closures), so the row can never fire an
+                                // action the turn is not ready for.
+                                MessageActionRow(
+                                    modifier = Modifier.padding(top = 2.dp),
+                                    actions = buildList {
+                                        add(ChatMessageAction(Icons.Default.ContentCopy, stringResource(R.string.chat_longpress_copy), onClick = copyUserMessage))
+                                        editUserMessage?.let { add(ChatMessageAction(Icons.Default.Edit, stringResource(R.string.chat_longpress_edit), onClick = it)) }
+                                        retryUserMessage?.let { add(ChatMessageAction(Icons.Default.Refresh, stringResource(R.string.chat_longpress_retry), onClick = it)) }
+                                    },
+                                )
+                                } // close the wrapper Column
                             } // close UserBubble SideEffect + UserMessageBubble block
                             is FlatChatItem.AssistantHeader -> AssistantHeader()
                             is FlatChatItem.AssistantText -> BoundsTrackedBlock(
@@ -4719,6 +4765,12 @@ fun ChatScreen(
                             is FlatChatItem.AssistantUsage -> {
                                 val msgId = originalMessageId(item.messageId)
                                 val shown = msgId in revealedUsageIds
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                // [T-android-message-actions] The capsule is optional
+                                // (a cancelled turn has no usage to report) but the row
+                                // is not: it closes every finished turn and hosts the
+                                // quick actions.
+                                item.usage?.let { usage ->
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -4753,9 +4805,40 @@ fun ChatScreen(
                                         enter = androidx.compose.animation.fadeIn(),
                                         exit = androidx.compose.animation.fadeOut(),
                                     ) {
-                                        UsageCapsule(usage = item.usage, completedAt = item.completedAt)
+                                        UsageCapsule(usage = usage, completedAt = item.completedAt)
                                     }
                                 }
+                                }
+                                // [T-android-message-actions] Under a finished reply:
+                                // copy the turn, and regenerate it when it is the last
+                                // one (retryLast re-runs the final turn; an earlier turn
+                                // is regenerated by retrying its user message, which the
+                                // long-press menu already offers).
+                                val turnText = assistantTurnText[msgId].orEmpty()
+                                MessageActionRow(
+                                    modifier = Modifier.padding(top = 2.dp),
+                                    actions = buildList {
+                                        if (turnText.isNotBlank()) {
+                                            add(ChatMessageAction(Icons.Default.ContentCopy, stringResource(R.string.chat_longpress_copy), onClick = { copyMessageText(turnText) }))
+                                        }
+                                        // No usage gate: a turn that ended badly (no
+                                        // usage reported) is exactly when a user wants
+                                        // to regenerate it.
+                                        if (!isStreaming && lastAssistantMessageId == msgId) {
+                                            add(
+                                                ChatMessageAction(
+                                                    Icons.Default.Refresh,
+                                                    stringResource(R.string.chat_longpress_retry),
+                                                    onClick = {
+                                                        coroutineScope.launch { tracedScrollToItem("RETRY-LAST", 0, 0) }
+                                                        safeMutate { viewModel.retryLast() }
+                                                    },
+                                                ),
+                                            )
+                                        }
+                                    },
+                                )
+                                } // close the wrapper Column
                             }
                             is FlatChatItem.AssistantError -> InlineErrorBanner(
                                 error = item.error,

@@ -211,15 +211,11 @@ object WebFetchTool {
                 }
 
                 val contentTypeHeader = response.header("Content-Type").orEmpty()
-                val bytes = response.body?.let { body ->
-                    val source = body.source()
-                    val limit = if (body.contentLength() > 0) {
-                        minOf(body.contentLength(), MAX_BODY_BYTES.toLong())
-                    } else {
-                        MAX_BODY_BYTES.toLong()
-                    }
-                    source.readByteArray(limit)
-                } ?: ByteArray(0)
+                // [T-http-body-read] Bounded drain, never an exact-count read: a
+                // compressed or chunked body reports contentLength() == -1, and
+                // `readByteArray(n)` then demanded the whole ceiling and threw
+                // EOFException on every gzip'd page.
+                val bytes = HttpBodyReader.readCapped(response.body, MAX_BODY_BYTES)
                 val raw = String(bytes, Charsets.UTF_8)
 
                 if (!response.isSuccessful) {
@@ -397,7 +393,7 @@ object WebFetchTool {
         s = s.replace(Regex("(?i)</(p|div|section|article|li|tr|h[1-6]|blockquote|pre)>"), "\n")
         s = s.replace(Regex("(?i)<li[^>]*>"), "\n- ")
         s = Regex("(?is)<[^>]+>").replace(s, " ")
-        s = decodeEntities(s)
+        s = HtmlText.decodeEntities(s)
         return s.split('\n')
             .map { it.replace(Regex("[ \\t\\u00a0]+"), " ").trim() }
             .filter { it.isNotEmpty() }
@@ -422,7 +418,7 @@ object WebFetchTool {
         s = Regex("(?is)<noscript[^>]*>.*?</noscript>").replace(s, " ")
         s = Regex("(?is)<head[^>]*>.*?</head>").replace(s, " ")
         s = Regex("(?is)<pre[^>]*>(.*?)</pre>").replace(s) { m ->
-            "\n```\n" + decodeEntities(Regex("(?is)<[^>]+>").replace(m.groupValues[1], "")) + "\n```\n"
+            "\n```\n" + HtmlText.decodeEntities(Regex("(?is)<[^>]+>").replace(m.groupValues[1], "")) + "\n```\n"
         }
         for (level in 1..6) {
             s = s.replace(Regex("(?is)<h$level[^>]*>(.*?)</h$level>")) { m ->
@@ -441,7 +437,7 @@ object WebFetchTool {
         s = s.replace(Regex("(?i)<br\\s*/?>"), "\n")
         s = s.replace(Regex("(?i)</(p|div|section|article|li|tr|h[1-6]|blockquote)>"), "\n")
         s = Regex("(?is)<[^>]+>").replace(s, " ")
-        s = decodeEntities(s)
+        s = HtmlText.decodeEntities(s)
         return s.split('\n')
             .map { it.replace(Regex("[ \\t\\u00a0]+"), " ").trimEnd() }
             .filter { it.isNotBlank() }
@@ -470,19 +466,9 @@ object WebFetchTool {
     }
 
     private fun collapseSpaces(raw: String): String =
-        decodeEntities(Regex("(?is)<[^>]+>").replace(raw, " "))
+        HtmlText.decodeEntities(Regex("(?is)<[^>]+>").replace(raw, " "))
             .replace(Regex("\\s+"), " ")
             .trim()
 
-    private fun decodeEntities(raw: String): String =
-        raw.replace("&nbsp;", " ")
-            .replace("&amp;", "&")
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&quot;", "\"")
-            .replace("&#39;", "'")
-            .replace("&apos;", "'")
-            .replace("&mdash;", "—")
-            .replace("&ndash;", "–")
-            .replace("&hellip;", "…")
+
 }

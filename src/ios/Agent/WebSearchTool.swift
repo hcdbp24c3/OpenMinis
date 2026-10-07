@@ -723,9 +723,13 @@ enum WebSearchTool {
         var out: [Result] = []
         var seen = Set<String>()
 
-        let cardPattern = "class=\"result(?:__body)?\"[\\s\\S]{0,2500}?class=\"result__a\"[^>]*href=\"([^\"]+)\"[^>]*>([\\s\\S]*?)</a>[\\s\\S]{0,1200}?class=\"result__snippet\"[^>]*>([\\s\\S]*?)</(?:a|td|div)>"
+        // [T-html-text] Real result blocks carry `class="result results_links …"`;
+        // the old pattern demanded the quote right after "result" and so never matched
+        // a live page (everything came from the nofollow fallback). The lookahead keeps
+        // result__a / result__snippet out, so the block still starts at the container.
+        let cardPattern = "class=\"result(?:__body)?" + "(?=[\\s\"])" + "[^\"]*\"" + "[\\s\\S]{0,2500}?class=\"result__a\"[^>]*href=\"([^\"]+)\"[^>]*>([\\s\\S]*?)</a>[\\s\\S]{0,1200}?class=\"result__snippet\"[^>]*>([\\s\\S]*?)</(?:a|td|div)>"
         for match in matches(cardPattern, in: html) where match.count >= 4 {
-            let url = decodeDuckLink(htmlUnescape(match[1]))
+            let url = decodeDuckLink(HtmlText.decodeEntities(match[1]))
             let title = stripTags(match[2])
             let snippet = stripTags(match[3])
             guard !url.isEmpty, !title.isEmpty, seen.insert(url).inserted else { continue }
@@ -736,7 +740,7 @@ enum WebSearchTool {
 
         let litePattern = "<a[^>]+rel=\"nofollow\"[^>]+href=\"(https?://[^\"]+)\"[^>]*>([\\s\\S]*?)</a>"
         for match in matches(litePattern, in: html) where match.count >= 3 {
-            let url = htmlUnescape(match[1])
+            let url = HtmlText.decodeEntities(match[1])
             if url.lowercased().contains("duckduckgo.com") { continue }
             let title = stripTags(match[2])
             guard !url.isEmpty, !title.isEmpty, seen.insert(url).inserted else { continue }
@@ -795,7 +799,7 @@ enum WebSearchTool {
     }
 
     static func decodeDuckLink(_ raw: String) -> String {
-        let href = htmlUnescape(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+        let href = HtmlText.decodeEntities(raw).trimmingCharacters(in: .whitespacesAndNewlines)
         let normalized: String
         if href.hasPrefix("//") {
             normalized = "https:" + href
@@ -904,19 +908,11 @@ enum WebSearchTool {
 
     private static func stripTags(_ raw: String) -> String {
         let withoutTags = raw.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
-        return htmlUnescape(withoutTags)
+        return HtmlText.decodeEntities(withoutTags)
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func htmlUnescape(_ raw: String) -> String {
-        raw.replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .replacingOccurrences(of: "&nbsp;", with: " ")
-    }
 
     /// Group 0 is the whole match, so callers index matches from 1.
     private static func matches(_ pattern: String, in text: String) -> [[String]] {

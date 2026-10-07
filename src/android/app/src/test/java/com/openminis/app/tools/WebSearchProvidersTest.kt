@@ -267,4 +267,24 @@ class WebSearchProvidersTest {
         // work on a fresh install.
         assertEquals(WebSearchSettings.Engine.DDG, WebSearchSettings.Engine.entries.first())
     }
+    // [T-html-text] A Vietnamese result title arrives with raw numeric references
+    // ("H&#224; N&#7897;i"). It is valid UTF-8 and unreadable — and wrong if the model
+    // quotes it — so the scraper has to decode entities, not just strip tags.
+    @Test
+    fun `scraped titles are entity-decoded`() {
+        val html = """
+            <div class="result results_links">
+              <h2 class="result__title">
+                <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fvi.example%2Fthoi-tiet&rut=x">Th&#7901;i ti&#7871;t H&#224; N&#7897;i h&#244;m nay</a>
+              </h2>
+              <a class="result__snippet">D&#7921; b&#225;o th&#7901;i ti&#7871;t &amp; nhi&#7879;t &#273;&#7897; cho H&#224; N&#7897;i.</a>
+            </div>
+        """.trimIndent()
+        val results = WebSearchTool.parseHtml(html)
+        assertEquals(1, results.size)
+        assertEquals("Thời tiết Hà Nội hôm nay", results[0].title)
+        assertTrue(results[0].snippet, results[0].snippet.contains("Dự báo thời tiết & nhiệt độ"))
+        assertEquals("https://vi.example/thoi-tiet", results[0].url)
+    }
+
 }

@@ -284,7 +284,7 @@ enum WebFetchTool {
         s = s.replacingOccurrences(of: "(?i)</(p|div|section|article|li|tr|h[1-6]|blockquote|pre)>", with: "\n", options: .regularExpression)
         s = s.replacingOccurrences(of: "(?i)<li[^>]*>", with: "\n- ", options: .regularExpression)
         s = s.replacingOccurrences(of: "(?is)<[^>]+>", with: " ", options: .regularExpression)
-        s = decodeEntities(s)
+        s = HtmlText.decodeEntities(s)
         let lines = s.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
             line.replacingOccurrences(of: "[ \\t\\u{00a0}]+", with: " ", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -306,7 +306,7 @@ enum WebFetchTool {
         s = s.replacingOccurrences(of: "(?is)<noscript[^>]*>.*?</noscript>", with: " ", options: .regularExpression)
         s = s.replacingOccurrences(of: "(?is)<head[^>]*>.*?</head>", with: " ", options: .regularExpression)
         s = replace(s, "(?is)<pre[^>]*>(.*?)</pre>") { groups in
-            "\n```\n" + decodeEntities(groups[1].replacingOccurrences(of: "(?is)<[^>]+>", with: "", options: .regularExpression)) + "\n```\n"
+            "\n```\n" + HtmlText.decodeEntities(groups[1].replacingOccurrences(of: "(?is)<[^>]+>", with: "", options: .regularExpression)) + "\n```\n"
         }
         for level in 1...6 {
             s = replace(s, "(?is)<h\(level)[^>]*>(.*?)</h\(level)>") { groups in
@@ -327,7 +327,7 @@ enum WebFetchTool {
         s = s.replacingOccurrences(of: "(?i)<br\\s*/?>", with: "\n", options: .regularExpression)
         s = s.replacingOccurrences(of: "(?i)</(p|div|section|article|li|tr|h[1-6]|blockquote)>", with: "\n", options: .regularExpression)
         s = s.replacingOccurrences(of: "(?is)<[^>]+>", with: " ", options: .regularExpression)
-        s = decodeEntities(s)
+        s = HtmlText.decodeEntities(s)
         let lines = s.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
             line.replacingOccurrences(of: "[ \\t\\u{00a0}]+", with: " ", options: .regularExpression)
                 .trimmingCharacters(in: .whitespaces)
@@ -355,23 +355,11 @@ enum WebFetchTool {
     }
 
     private static func collapseSpaces(_ raw: String) -> String {
-        decodeEntities(raw.replacingOccurrences(of: "(?is)<[^>]+>", with: " ", options: .regularExpression))
+        HtmlText.decodeEntities(raw.replacingOccurrences(of: "(?is)<[^>]+>", with: " ", options: .regularExpression))
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespaces)
     }
 
-    private static func decodeEntities(_ raw: String) -> String {
-        raw.replacingOccurrences(of: "&nbsp;", with: " ")
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .replacingOccurrences(of: "&apos;", with: "'")
-            .replacingOccurrences(of: "&mdash;", with: "—")
-            .replacingOccurrences(of: "&ndash;", with: "–")
-            .replacingOccurrences(of: "&hellip;", with: "…")
-    }
 
     /// `NSRegularExpression` replacement with a closure: group 0 is the whole
     /// match, so the captured groups are 1...n.

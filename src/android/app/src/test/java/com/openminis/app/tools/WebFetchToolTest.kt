@@ -4,6 +4,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody
+import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.Buffer
 import org.junit.Test
 import java.net.InetAddress
 
@@ -211,4 +215,67 @@ class WebFetchToolTest {
         assertFalse(FetchUrlGuard.isUnsafeAddress(InetAddress.getByName("1.1.1.1")))
         assertFalse(FetchUrlGuard.isUnsafeAddress(InetAddress.getByName("2606:4700:4700::1111")))
     }
+    // ── response bodies ─────────────────────────────────────────────────────
+    //
+    // The regression these pin: `readByteArray(n)` demands EXACTLY n bytes, so a body
+    // shorter than the ceiling threw `EOFException("End of input")`. OkHttp reports
+    // contentLength() == -1 for anything gzip'd (which is everything, since it sends
+    // Accept-Encoding) or chunked, so the tool asked for the full 2MB and died on
+    // every plain fetch while `render: true` and curl kept working — the shape of the
+    // report that led here.
+
+    private fun unknownLengthBody(text: String): ResponseBody = object : ResponseBody() {
+        override fun contentType() = "text/html".toMediaType()
+        // -1 = "length not known up front": gzip-decoded, chunked, or a stream.
+        override fun contentLength(): Long = -1L
+        override fun source() = Buffer().writeUtf8(text)
+    }
+
+    @Test
+    fun `a short body with an unknown length is read to the end, not rejected`() {
+        val bytes = HttpBodyReader.readCapped(unknownLengthBody("hello"), maxBytes = 2_000_000)
+        assertEquals("hello", String(bytes, Charsets.UTF_8))
+    }
+
+    @Test
+    fun `a body longer than the cap is cut at the cap`() {
+        val body = "x".repeat(5_000).toResponseBody("text/plain".toMediaType())
+        assertEquals(1_000, HttpBodyReader.readCapped(body, maxBytes = 1_000).size)
+    }
+
+    @Test
+    fun `a known short length and an empty or absent body behave`() {
+        val known = "abc".toResponseBody("text/plain".toMediaType())
+        assertEquals(3, HttpBodyReader.readCapped(known, maxBytes = 2_000_000).size)
+        assertEquals(0, HttpBodyReader.readCapped("".toResponseBody(null), maxBytes = 100).size)
+        assertEquals(0, HttpBodyReader.readCapped(null, maxBytes = 100).size)
+        assertEquals(0, HttpBodyReader.readCapped(unknownLengthBody("data"), maxBytes = 0).size)
+    }
+
+    @Test
+    fun `a body split across reads is assembled in full`() {
+        // 64KB chunking inside the reader: a body just over one chunk must not lose
+        // its tail.
+        val text = "y".repeat(70_000)
+        val bytes = HttpBodyReader.readCapped(unknownLengthBody(text), maxBytes = 2_000_000)
+        assertEquals(70_000, bytes.size)
+        assertEquals(text, String(bytes, Charsets.UTF_8))
+    }
+
+    // ── entity decoding (shared with web_search) ────────────────────────────
+
+    @Test
+    fun `numeric and named entities decode, unknown ones are left alone`() {
+        assertEquals("Hà Nội", HtmlText.decodeEntities("H&#224; N&#x1ED9;i"))
+        assertEquals("Tiếng Việt", HtmlText.decodeEntities("Ti&#7871;ng Vi&#7879;t"))
+        assertEquals("café — 5 × 3 €", HtmlText.decodeEntities("caf&eacute; &mdash; 5 &times; 3 &euro;"))
+        assertEquals("a & b < c > d \" e ' f", HtmlText.decodeEntities("a &amp; b &lt; c &gt; d &quot; e &#39; f"))
+        // Astral code point and the surrogate-pair form pages actually emit.
+        assertEquals("\uD83D\uDE00", HtmlText.decodeEntities("&#x1F600;"))
+        assertEquals("\uD83D\uDE00", HtmlText.decodeEntities("&#55357;&#56832;"))
+        // A decoder that drops text is worse than one that leaves the reference.
+        assertEquals("&#xZZ; &unknownentity; &#; &# ", HtmlText.decodeEntities("&#xZZ; &unknownentity; &#; &# "))
+        assertEquals("plain text without entities", HtmlText.decodeEntities("plain text without entities"))
+    }
+
 }

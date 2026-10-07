@@ -2,6 +2,7 @@ package com.openminis.app.ui.chat
 
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -18,9 +19,10 @@ import org.junit.Test
  * from the DB on re-entry, which is why it "came back".
  *
  * Two layers are pinned here:
- *  - the flat build's contract (a non-streaming reply WITH usage yields exactly
- *    one AssistantUsage row; without usage, none) — this is the gate the live
- *    path was silently failing, and it documents the failure mode; and
+ *  - the flat build's contract (every non-streaming reply yields exactly one
+ *    AssistantUsage row — the row also hosts the quick actions and so cannot be
+ *    gated on usage — while the CAPSULE inside it needs usage to have something to
+ *    reveal) — this is the gate the live path was silently failing; and
  *  - a source assertion that `persistAssistantTurn` stamps the live bubble the
  *    same way the load path does, from both callers in the agent loop. The VM
  *    needs a Context/DB/provider to construct, so (as with SwitchModelGhostRetry
@@ -57,11 +59,15 @@ class UsageCapsuleLiveStampTest {
     }
 
     @Test
-    fun `a finished reply WITHOUT usage yields no row — the pre-fix live state`() {
-        // This is what every freshly streamed reply looked like before the fix:
-        // streaming over, but tokenUsage never stamped. Nothing to reveal.
+    fun `a finished reply WITHOUT usage still closes the turn, with no capsule`() {
+        // [T-android-message-actions] The row is no longer only the capsule's host:
+        // it also carries the quick actions (copy, regenerate), and a turn that ended
+        // without usage — cancelled, or a provider that reports none — is exactly when
+        // a user wants to copy or re-run it. So the ROW is emitted for every finished
+        // turn and only the capsule inside it stays gated on usage.
         val rows = usageRows(user("u1"), reply("a1", streaming = false, withUsage = false))
-        assertTrue("no usage → no capsule row; this is the bug's failure mode", rows.isEmpty())
+        assertEquals(1, rows.size)
+        assertNull("no usage → nothing to reveal", rows[0].usage)
     }
 
     @Test

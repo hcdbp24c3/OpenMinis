@@ -731,11 +731,18 @@ object WebSearchTool {
         val out = ArrayList<Result>(max)
         val seen = HashSet<String>()
         val resultBlock = Regex(
-            """class="result(?:__body)?"[\s\S]{0,2500}?class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>[\s\S]{0,1200}?class="result__snippet"[^>]*>([\s\S]*?)</(?:a|td|div)>""",
+            // [T-html-text] The class attribute on a real result block is
+            // `result results_links results_links_deep web-result` — the previous
+            // `class="result(?:__body)?"` required the quote straight after "result"
+            // and so never matched a live page, leaving every scrape to the
+            // rel="nofollow" fallback. The lookahead keeps `result__a` and
+            // `result__snippet` out (they continue with `_`), so the block still
+            // starts at the container and not mid-result.
+            """class="result(?:__body)?(?=[\s"])[^"]*"[\s\S]{0,2500}?class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>[\s\S]{0,1200}?class="result__snippet"[^>]*>([\s\S]*?)</(?:a|td|div)>""",
             RegexOption.IGNORE_CASE,
         )
         for (m in resultBlock.findAll(html)) {
-            val url = decodeDuckLink(htmlUnescape(m.groupValues[1]))
+            val url = decodeDuckLink(HtmlText.decodeEntities(m.groupValues[1]))
             val title = stripTags(m.groupValues[2])
             val snippet = stripTags(m.groupValues[3])
             if (url.isBlank() || title.isBlank()) continue
@@ -749,7 +756,7 @@ object WebSearchTool {
             RegexOption.IGNORE_CASE,
         )
         for (m in lite.findAll(html)) {
-            val url = htmlUnescape(m.groupValues[1])
+            val url = HtmlText.decodeEntities(m.groupValues[1])
             if (url.contains("duckduckgo.com", ignoreCase = true)) continue
             val title = stripTags(m.groupValues[2])
             if (url.isBlank() || title.isBlank()) continue
@@ -761,7 +768,7 @@ object WebSearchTool {
     }
 
     internal fun decodeDuckLink(raw: String): String {
-        val href = htmlUnescape(raw).trim()
+        val href = HtmlText.decodeEntities(raw).trim()
         val normalized = when {
             href.startsWith("//") -> "https:$href"
             href.startsWith("/l/?") -> "https://duckduckgo.com$href"
@@ -967,14 +974,11 @@ object WebSearchTool {
     }
 
     private fun stripTags(raw: String): String =
-        htmlUnescape(raw.replace(Regex("<[^>]+>"), " "))
+        HtmlText.decodeEntities(raw.replace(Regex("<[^>]+>"), " "))
             .replace(Regex("\\s+"), " ")
             .trim()
 
-    private fun htmlUnescape(raw: String): String =
-        raw.replace("&amp;", "&")
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
+
             .replace("&quot;", "\"")
             .replace("&#39;", "'")
             .replace("&nbsp;", " ")

@@ -571,7 +571,10 @@ object RepoDigestTool {
             client.newCall(request(url, token, accept, authHeader, authPrefix).get().build()).execute().use { response ->
                 if (!response.isSuccessful) return null
                 val body = response.body ?: return null
-                body.source().readByteArray(minOf(body.contentLength().coerceAtLeast(0), MAX_FILE_BYTES.toLong()))
+                // [T-http-body-read] Was readByteArray(contentLength): a chunked or
+                // compressed raw response reports -1, which coerced to 0 and silently
+                // returned an EMPTY file. Drain up to the cap instead.
+                HttpBodyReader.readCapped(body, MAX_FILE_BYTES)
             }
         } catch (_: Exception) {
             null

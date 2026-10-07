@@ -1476,12 +1476,17 @@ internal fun HelperTranscript(
                                 detectTapGestures { vm.toggleUsageCapsule(msgId) }
                             },
                     ) {
+                        // [T-android-message-actions] usage is optional now: the row is
+                        // emitted for every finished turn (it hosts the quick actions),
+                        // but a turn that reported no usage has no capsule to show.
+                        item.usage?.let { usage ->
                         androidx.compose.animation.AnimatedVisibility(
                             visible = msgId in revealedUsage,
                             enter = androidx.compose.animation.fadeIn(),
                             exit = androidx.compose.animation.fadeOut(),
                         ) {
-                            UsageCapsule(item.usage, item.completedAt)
+                            UsageCapsule(usage, item.completedAt)
+                        }
                         }
                     }
                 }

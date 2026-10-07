@@ -494,7 +494,11 @@ internal sealed class FlatChatItem {
      */
     data class AssistantUsage(
         val messageId: String,
-        val usage: ChatTokenUsage,
+        // [T-android-message-actions] Null when the provider reported no usage (a
+        // cancelled or failed turn). The item is still emitted: it is the row the
+        // quick actions hang off, and "copy what did arrive" is exactly what a user
+        // wants from a turn that ended badly.
+        val usage: ChatTokenUsage?,
         val completedAt: Long?,
     ) : FlatChatItem() {
         override val key = "usage:$messageId"
@@ -972,10 +976,8 @@ internal fun buildFlatChatItems(
         // LAST row is still streaming carries the PREVIOUS turn's usage, and
         // showing that mid-stream would report a finish time for a turn that has
         // not finished.
-        message.tokenUsage?.let { u ->
-            if (!message.isStreaming) {
-                out.add(dedupe(FlatChatItem.AssistantUsage(message.id, u, message.completedAt)))
-            }
+        if (!message.isStreaming) {
+            out.add(dedupe(FlatChatItem.AssistantUsage(message.id, message.tokenUsage, message.completedAt)))
         }
     }
     return out

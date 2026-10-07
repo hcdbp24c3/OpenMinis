@@ -197,6 +197,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
@@ -1082,3 +1083,60 @@ internal fun SwipeToSendHint(
     }
 }
 // Sun May 24 10:16:43 CST 2026
+
+/**
+ * [T-android-message-actions] One icon in [MessageActionRow].
+ *
+ * A plain holder rather than a Compose slot: the row is built per message on every
+ * recomposition, so keeping it to data + a lambda avoids a composable per icon in
+ * the hot path of the message list.
+ */
+internal class ChatMessageAction(
+    val icon: ImageVector,
+    val label: String,
+    val tint: Color = Color.Unspecified,
+    val onClick: () -> Unit,
+)
+
+/**
+ * [T-android-message-actions] The quick actions under a message (copy, edit, retry…),
+ * the row iOS and every other chat app puts under a bubble.
+ *
+ * Deliberately not a 48dp-per-icon Material row: two 48dp rows under every message
+ * would add ~100dp to the transcript. 30dp circles with 17dp glyphs keep the row the
+ * height of one text line, and the same actions remain in the long-press menu, which
+ * is where a thumb-sized target belongs.
+ *
+ * Renders nothing when [actions] is empty, so a streaming turn or a message with no
+ * applicable action leaves no gap.
+ */
+@Composable
+internal fun MessageActionRow(
+    actions: List<ChatMessageAction>,
+    modifier: Modifier = Modifier,
+    arrangement: Arrangement.Horizontal = Arrangement.End,
+) {
+    if (actions.isEmpty()) return
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = arrangement,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        actions.forEach { action ->
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = action.onClick),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = action.icon,
+                    contentDescription = action.label,
+                    tint = if (action.tint == Color.Unspecified) MaterialTheme.colorScheme.onSurfaceVariant else action.tint,
+                    modifier = Modifier.size(17.dp),
+                )
+            }
+        }
+    }
+}
