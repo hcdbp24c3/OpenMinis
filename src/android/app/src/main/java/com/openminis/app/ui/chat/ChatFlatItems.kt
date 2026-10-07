@@ -982,3 +982,67 @@ internal fun buildFlatChatItems(
     }
     return out
 }
+
+/**
+ * [T-android-copy-answer-scope] The text of each message's LAST text block, keyed by
+ * message id — what a message-level Copy takes when nothing is selected.
+ *
+ * Not "the last row on screen". An assistant text block is split into rendering
+ * fragments (`splitMarkdownIntoBlockTexts`), each becoming its own row, so the last row
+ * of an ordinary multi-paragraph reply is its last PARAGRAPH: copying that would be a
+ * silent regression for every reply that is not an agent turn. The fragments of one
+ * block share `parentBlockId`, so grouping by it and taking the last group in document
+ * order recovers exactly the last block.
+ *
+ * And not "the whole message" either: an agent turn is narration, tool calls, then the
+ * answer, and the answer is what a copy under the reply should hand back.
+ *
+ * A message with no text row at all (tool-only) is absent from the map, which the caller
+ * reads as "fall back to the whole turn".
+ */
+internal fun lastTextBlockPerMessage(
+    items: List<FlatChatItem>,
+    /**
+     * Maps a row's message id to the owning message. The caller passes its own
+     * `originalMessageId` because a row can belong to a *merged* message (the grouping
+     * feature folds several ids under one heading) and the roster of ids lives in the
+     * composition, not here.
+     */
+    idOf: (String) -> String = { it },
+): Map<String, String> {
+    val groups = LinkedHashMap<String, MutableList<String>>()
+    for (flat in items) {
+        val key = when (flat) {
+            is FlatChatItem.AssistantMarkdownBlock ->
+                idOf(flat.messageId) + BLOCK_GROUP_SEPARATOR + flat.parentBlockId
+            // Guarded by kind: tool_use and thinking blocks render as pills/rows of their
+            // own, and an "answer" made of a tool's JSON args would be nonsense.
+            is FlatChatItem.AssistantText ->
+                if (flat.block.kind == "text") {
+                    idOf(flat.messageId) + BLOCK_GROUP_SEPARATOR + flat.block.id
+                } else {
+                    null
+                }
+            is FlatChatItem.AssistantLegacyContent ->
+                idOf(flat.messageId) + BLOCK_GROUP_SEPARATOR + "legacy"
+            else -> null
+        } ?: continue
+        val text = when (flat) {
+            is FlatChatItem.AssistantMarkdownBlock -> flat.rawText
+            is FlatChatItem.AssistantText -> flat.block.content
+            is FlatChatItem.AssistantLegacyContent -> flat.content
+            else -> null
+        } ?: continue
+        if (text.isEmpty()) continue
+        groups.getOrPut(key) { mutableListOf() }.add(text)
+    }
+    // Insertion order is document order, so the last group written for a message wins.
+    val out = LinkedHashMap<String, String>()
+    for ((key, fragments) in groups) {
+        out[key.substringBefore(BLOCK_GROUP_SEPARATOR)] = fragments.joinToString("")
+    }
+    return out
+}
+
+/** NUL cannot occur in a shard or block id, so it cannot collide here. */
+private const val BLOCK_GROUP_SEPARATOR = "\u0000"

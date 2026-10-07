@@ -75,6 +75,58 @@ class SelectionCopyScopeTest {
         rememberMessageMarkdown(msg, markdown)
     }
 
+    // ── which text is "the answer" ──────────────────────────────────────────
+
+    private fun mdRow(msg: String, parent: String, index: Int, raw: String) =
+        FlatChatItem.AssistantMarkdownBlock(
+            messageId = msg,
+            parentBlockId = parent,
+            rawText = raw,
+            blockIndex = index,
+            isLastBlockOfMessage = false,
+            messageIsStreaming = false,
+            messageMarkdown = raw,
+        )
+
+    @Test
+    fun `the answer is the last TEXT BLOCK, not the last rendered fragment`() {
+        // One text block split into three rendering fragments (an ordinary multi-paragraph
+        // reply), then a second block after the tools: the answer is the second block.
+        val items = listOf(
+            mdRow(msg, "b1", 0, "para one\n\n"),
+            mdRow(msg, "b1", 1, "para two\n\n"),
+            mdRow(msg, "b1", 2, "para three"),
+            mdRow(msg, "b2", 0, "answer"),
+        )
+        assertEquals("answer", lastTextBlockPerMessage(items)[msg])
+    }
+
+    @Test
+    fun `a message with a single split block keeps the whole block`() {
+        // The regression this rule exists for: copying the last ROW would hand back
+        // "para three" alone.
+        val items = listOf(
+            mdRow(msg, "b1", 0, "para one\n\n"),
+            mdRow(msg, "b1", 1, "para two\n\n"),
+            mdRow(msg, "b1", 2, "para three"),
+        )
+        assertEquals("para one\n\npara two\n\npara three", lastTextBlockPerMessage(items)[msg])
+    }
+
+    @Test
+    fun `a tool-only turn has no answer to prefer`() {
+        // The caller falls back to the whole turn, so the action still copies something.
+        // A tool or thinking block is not an answer, even when it arrives as a text row.
+        val toolRow = FlatChatItem.AssistantText(
+            messageId = msg,
+            block = AssistantBlock(id = "t1", kind = "tool_use", content = "{\"cmd\":\"ls\"}"),
+            isStreaming = false,
+            messageMarkdown = "{}",
+        )
+        assertEquals(emptyMap<String, String>(), lastTextBlockPerMessage(listOf(toolRow)))
+        assertEquals(emptyMap<String, String>(), lastTextBlockPerMessage(emptyList()))
+    }
+
     // ── a message-level Copy: selection, else the ANSWER, else the turn ─────
     //
     // Reported twice. First: an agent turn renders `a` · tool call · tool call · `b`,

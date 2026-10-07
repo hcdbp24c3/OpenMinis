@@ -4030,22 +4030,12 @@ fun ChatScreen(
                         }
                     }.toMap()
                 }
-                // [T-android-copy-scope-cheap] The LAST text block of each turn, on its
-                // own: an agent reply renders as narration, tool cards, then the answer,
-                // and "copy" under that reply should hand back the answer. The map keeps
-                // the last occurrence per message, which is document order.
+                // [T-android-copy-scope-cheap] The LAST TEXT BLOCK of each turn — see
+                // lastTextBlockPerMessage for why it is a block and not the last row (an
+                // ordinary reply's last row is only its last paragraph) and not the whole
+                // message (an agent reply's answer sits under its narration and tools).
                 val assistantFinalText = remember(flatItems) {
-                    flatItems.mapNotNull { flat ->
-                        when (flat) {
-                            is FlatChatItem.AssistantMarkdownBlock ->
-                                originalMessageId(flat.messageId) to flat.rawText
-                            is FlatChatItem.AssistantText ->
-                                originalMessageId(flat.messageId) to flat.block.content
-                            is FlatChatItem.AssistantLegacyContent ->
-                                originalMessageId(flat.messageId) to flat.content
-                            else -> null
-                        }
-                    }.toMap()
+                    lastTextBlockPerMessage(flatItems) { originalMessageId(it) }
                 }
                 val lastAssistantMessageId = remember(messages) {
                     messages.lastOrNull { it.role == "assistant" }?.id
@@ -4848,7 +4838,8 @@ fun ChatScreen(
                                 // One action when the final block IS the turn (an ordinary
                                 // reply, or a turn with no text at all): two identical copy
                                 // buttons would be noise.
-                                val turnMatchesFinal = finalText.isBlank() || finalText == turnText
+                                val turnMatchesFinal = finalText.isBlank() ||
+                                    finalText.trim() == turnText.trim()
                                 MessageActionRow(
                                     modifier = Modifier.padding(top = 2.dp),
                                     actions = buildList {
