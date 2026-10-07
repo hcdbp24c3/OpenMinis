@@ -176,7 +176,17 @@ class SupportsReasoningDefaultsTest {
         )
     }
 
-    /** Guards the restated predicate against drifting from the source. */
+    /**
+     * Guards the restated predicate against drifting from the source.
+     *
+     * The assertion pins the WHOLE stamp expression, not just the prefill half:
+     * `apiReasoning ?:` is [T-model-metadata-from-api] (an explicit
+     * `"reasoning": false` from the gateway is kept — see
+     * OpenAIModelsApiParsingTest), so the parse can legitimately stamp `false`
+     * from the API. What must never drift is the prefill branch itself: when
+     * the API is silent, a known family stamps `true` and everything else
+     * `null`, never `false`.
+     */
     @Test
     fun `the restated prefill predicate matches the source`() {
         val src = com.openminis.app.ProductionSources.read("provider/openai/OpenAIModelsApi.kt")
@@ -187,8 +197,8 @@ class SupportsReasoningDefaultsTest {
         assertTrue(src.contains("""idLower.startsWith("o4")"""))
         assertTrue(src.contains("""idLower.contains("codex")"""))
         assertTrue(
-            "the parse must stamp true / null, never false",
-            src.contains("supportsReasoning = if (knownReasoning) true else null"),
+            "the prefill must stamp true for known families and null otherwise, never false",
+            src.contains("supportsReasoning = apiReasoning ?: if (knownReasoning) true else null"),
         )
     }
 

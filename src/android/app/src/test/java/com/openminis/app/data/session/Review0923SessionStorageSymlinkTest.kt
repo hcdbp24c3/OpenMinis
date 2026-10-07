@@ -30,6 +30,23 @@ class Review0923SessionStorageSymlinkTest {
 
     private fun write(f: File, bytes: Int) { f.parentFile!!.mkdirs(); f.writeBytes(ByteArray(bytes)) }
 
+    /**
+     * The owner-write bit of [f]'s MODE, or null where the file system has no
+     * POSIX modes (Windows).
+     *
+     * `File.canWrite()` cannot stand in for this: it is an access(2) check, so
+     * a root/CAP_DAC_OVERRIDE process — the case in a container that runs the
+     * suite as uid 0 — reports true for a 0555 directory no matter what the
+     * delete did to it. chmod, unlike access, is not privileged, so the mode is
+     * the observable that witnesses "keeps its mode" in a root and an ordinary
+     * run alike: the pre-fix `walkBottomUp()` chmod'ed this directory when the
+     * suite ran unprivileged, and still would be caught here.
+     */
+    private fun ownerWriteBit(f: File): Boolean? =
+        runCatching { Files.getPosixFilePermissions(f.toPath()) }
+            .getOrNull()
+            ?.contains(java.nio.file.attribute.PosixFilePermission.OWNER_WRITE)
+
     @Test
     fun `BUG a directory symlink in the workspace does not delete the target's contents`() {
         val filesDir = tmp.newFolder("files")
@@ -84,7 +101,13 @@ class Review0923SessionStorageSymlinkTest {
                 outside.toPath(),
             )
             storage.deleteFilesDetailed("A")
-            assertFalse("a directory outside the session must keep its mode", outside.canWrite())
+            val ownerWrite = ownerWriteBit(outside)
+            if (ownerWrite != null) {
+                assertFalse("a directory outside the session must keep its mode", ownerWrite)
+            } else {
+                // No POSIX modes here; canWrite() is the only observable left.
+                assertFalse("a directory outside the session must keep its mode", outside.canWrite())
+            }
         } finally {
             outside.setWritable(true, true)
         }

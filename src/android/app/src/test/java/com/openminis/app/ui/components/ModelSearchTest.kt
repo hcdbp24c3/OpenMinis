@@ -85,10 +85,13 @@ class ModelSearchTest {
 
     @Test
     fun `a provider-name hit shows that provider's whole list`() {
+        // The query names the provider, not any model: the gguf path below
+        // shares no subsequence with it, so the section can survive only
+        // through the label hit — and it survives WHOLE.
         val r = ModelSearch.search(
             listOf("host.example.com" to listOf(entry("/models/Qwen3.8-27B.gguf")), "Other" to listOf(entry("gpt-5"))),
             label = { it },
-            query = "wsen",
+            query = "host",
         )
         assertEquals(listOf("host.example.com"), r.sections.map { it.key })
         assertEquals(1, r.sections.single().entries.size)

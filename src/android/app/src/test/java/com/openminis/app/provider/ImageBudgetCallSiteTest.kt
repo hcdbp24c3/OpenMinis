@@ -46,10 +46,27 @@ class ImageBudgetCallSiteTest {
         val streamCalls = Regex("currentProvider\\.streamMessage\\(").findAll(loop).count()
         assertEquals("expected a single streamMessage call site in runAgentLoop", 1, streamCalls)
         val callIdx = loop.indexOf("currentProvider.streamMessage(")
-        val window = loop.substring(callIdx, callIdx + 700)
-        assertTrue("outgoing history must be budgeted", window.contains("applyRequestImageBudget("))
-        assertTrue("budget wraps the effective history", window.contains("effectiveAgentHistory()"))
-        assertTrue("byte audit sits outermost", window.contains("auditOutgoingPayload("))
+        // The effective history is hoisted into `outboundHistory` just above the
+        // call so [T-ctx-measure-outbound] can measure the exact list this request
+        // carries (`recordContextDispatch(outboundHistory, ...)`); the budget is
+        // therefore handed that local instead of an inline `effectiveAgentHistory()`
+        // call. The invariant is unchanged — what goes on the wire is still
+        // effectiveAgentHistory() wrapped in the budget, audit outermost — so pin
+        // the binding AND that the budgeted argument is that binding.
+        val hoistIdx = loop.lastIndexOf("val outboundHistory = effectiveAgentHistory()", callIdx)
+        assertTrue("effectiveAgentHistory() must be bound before the stream call", hoistIdx in 0 until callIdx)
+        val window = loop.substring(callIdx, (callIdx + 700).coerceAtMost(loop.length))
+        val budgetIdx = window.indexOf("applyRequestImageBudget(")
+        assertTrue("outgoing history must be budgeted", budgetIdx >= 0)
+        val auditIdx = window.indexOf("auditOutgoingPayload(")
+        assertTrue("byte audit sits outermost", auditIdx in 0 until budgetIdx)
+        // Ignoring comments, the request's first argument is the audit wrapper.
+        val firstArg = window.substring("currentProvider.streamMessage(".length)
+            .lineSequence().map(String::trim).filter { it.isNotEmpty() && !it.startsWith("//") }.first()
+        assertTrue("byte audit sits outermost", firstArg.startsWith("auditOutgoingPayload("))
+        val budgetArg = window.substring(budgetIdx + "applyRequestImageBudget(".length)
+            .substringBefore(')').trim().trimEnd(',')
+        assertEquals("budget wraps the effective history", "outboundHistory", budgetArg)
         // Retry + fallback paths re-enter the same loop.
         assertTrue(loop.contains("while (!collectDone)"))
         assertTrue(loop.contains("retryAttempt = 0"))

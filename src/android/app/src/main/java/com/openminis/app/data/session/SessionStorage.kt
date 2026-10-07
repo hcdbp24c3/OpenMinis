@@ -15,7 +15,19 @@ import java.io.File
  * session's files goes through here; the storage screen used to carry its own
  * copies of these walks and the delete paths had none at all.
  */
-class SessionStorage(private val filesDir: File) {
+class SessionStorage(
+    private val filesDir: File,
+    /**
+     * [T-android-storage-delete-feedback] The unlink [deleteTreeNoFollow]
+     * performs, as a parameter only so a test can make one path genuinely
+     * undeletable. A root (CAP_DAC_OVERRIDE) test process unlinks straight
+     * through a 0555 parent, so the kernel denial #375's failure report exists
+     * for cannot be produced there with file modes; a throwing [deletePath]
+     * says exactly what the kernel says to an unprivileged app process.
+     * Production never passes one.
+     */
+    private val deletePath: (java.nio.file.Path) -> Unit = { java.nio.file.Files.delete(it) },
+) {
 
     val sessionsRoot: File get() = File(filesDir, SESSIONS_DIR)
     val mediaRoot: File get() = File(filesDir, MEDIA_DIR)
@@ -179,7 +191,7 @@ class SessionStorage(private val filesDir: File) {
                         // Without FOLLOW_LINKS a link (to a file OR a
                         // directory) arrives here; Files.delete removes the
                         // link itself.
-                        runCatching { java.nio.file.Files.delete(file) }
+                        runCatching { deletePath(file) }
                         return java.nio.file.FileVisitResult.CONTINUE
                     }
 
@@ -187,7 +199,7 @@ class SessionStorage(private val filesDir: File) {
                         file: java.nio.file.Path,
                         exc: java.io.IOException,
                     ): java.nio.file.FileVisitResult {
-                        runCatching { java.nio.file.Files.delete(file) }
+                        runCatching { deletePath(file) }
                         return java.nio.file.FileVisitResult.CONTINUE
                     }
 
@@ -195,7 +207,7 @@ class SessionStorage(private val filesDir: File) {
                         dir: java.nio.file.Path,
                         exc: java.io.IOException?,
                     ): java.nio.file.FileVisitResult {
-                        runCatching { java.nio.file.Files.delete(dir) }
+                        runCatching { deletePath(dir) }
                         return java.nio.file.FileVisitResult.CONTINUE
                     }
                 },

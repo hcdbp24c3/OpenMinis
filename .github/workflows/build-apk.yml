@@ -93,16 +93,17 @@ jobs:
         # failure, and so the two never hide each other. The JVM suite covers the
         # tool layer (URL/SSRF guards, HTML extraction, response-body reads, the
         # git vault's host matching and generated sandbox files) — the parts of a
-        # tool that fail SILENTLY on device.
+        # tool that fail SILENTLY on device — plus the chat selection/copy scope and
+        # the session-storage delete reporting.
         #
-        # NOT a gate yet: this branch carries 8 pre-existing failures unrelated to
-        # the tool layer (CrossPlatformBackupRestoreUnitTest,
+        # A GATE. It used to be `continue-on-error: true` because the branch carried
+        # eight pre-existing failures (CrossPlatformBackupRestoreUnitTest,
         # SupportsReasoningDefaultsTest, Review0923SessionStorageSymlinkTest,
         # SessionStorageTest, ImageBudgetCallSiteTest, ScheduledResumeNudgeTest,
-        # ViewModelInitOrderTest, ModelSearchTest). Blocking on them would hide the
-        # APK and every genuine failure behind them; the report artifact below is
-        # the signal until they are fixed.
-        continue-on-error: true
+        # ViewModelInitOrderTest, ModelSearchTest). All eight are fixed — stale
+        # guards repaired rather than relaxed, and the two session-storage ones made
+        # independent of the runner's uid — so the whole suite is green (4043 tests)
+        # and a new failure must stop the build instead of hiding behind them.
         working-directory: src/android
         run: ./gradlew testDebugUnitTest --no-daemon
 

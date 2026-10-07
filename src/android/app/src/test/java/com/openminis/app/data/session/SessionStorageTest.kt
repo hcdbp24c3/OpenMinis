@@ -7,6 +7,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.nio.file.AccessDeniedException
+import java.nio.file.Files
 
 /**
  * [T-android-child-session-delete-storage] Parent + child each own a
@@ -103,32 +105,39 @@ class SessionStorageTest {
     @Test
     fun `an undeletable file is REPORTED rather than silently swallowed`() {
         // The whole point of #375's UI half: when the delete genuinely cannot
-        // finish, the caller must learn about it. Here the read-only bit is on
-        // the session dir's GRANDPARENT (filesDir/minis-sessions), which
-        // restoreWritable() never walks because it starts at the session dir —
-        // so the unlink really fails and must surface in failedPaths.
+        // finish, the caller must learn about it.
+        //
+        // The obstacle is the unlink itself, not a read-only ancestor. The
+        // original version dropped +w on filesDir/minis-sessions and relied on
+        // the kernel refusing the rmdir; that refusal does not exist for uid 0,
+        // whose CAP_DAC_OVERRIDE unlinks straight through a 0555 parent, so a
+        // suite run as root saw the delete complete and this guard failed for
+        // an environment reason rather than a product one. (Verified with the
+        // same call under `setpriv --reuid=65534`: EACCES on this path and the
+        // v1 behaviour above.) Throwing from the unlink seam says for uid 0
+        // exactly what the kernel says to an unprivileged app process — and
+        // ONLY for the session dir, so the inner file still goes and `freed`
+        // still counts it.
         val filesDir = tmp.newFolder("files")
         write(File(filesDir, "minis-sessions/P/workspace/a.txt"), 100)
-        val sessionsRoot = File(filesDir, "minis-sessions")
-        assertTrue(sessionsRoot.setWritable(false, false))
-        try {
-            val s = SessionStorage(filesDir)
-            val r = s.deleteFilesDetailed("P")
-            assertFalse("a failed delete must not claim completion", r.isComplete)
-            assertTrue(
-                "the surviving path must be named, got ${r.failedPaths}",
-                r.failedPaths.any { it.contains("minis-sessions") && it.endsWith("P") },
-            )
-            // `freed` counts what really left: the inner file IS removable
-            // (its own parent is writable), only the top session dir survives.
-            // The contract that matters is that the caller is TOLD, not that
-            // the byte count is zero.
-            assertEquals("only the emptied file's bytes count", 100L, r.freed)
-            assertTrue("the session dir itself survives", File(filesDir, "minis-sessions/P").exists())
-        } finally {
-            // Always restore, or TemporaryFolder cannot clean up.
-            sessionsRoot.setWritable(true, true)
+        val s = SessionStorage(filesDir) { path ->
+            if (path.fileName.toString() == "P") throw AccessDeniedException(path.toString())
+            Files.delete(path)
         }
+
+        val r = s.deleteFilesDetailed("P")
+
+        assertFalse("a failed delete must not claim completion", r.isComplete)
+        assertTrue(
+            "the surviving path must be named, got ${r.failedPaths}",
+            r.failedPaths.any { it.contains("minis-sessions") && it.endsWith("P") },
+        )
+        // `freed` counts what really left: the inner file IS removable (its own
+        // parent is writable), only the top session dir survives. The contract
+        // that matters is that the caller is TOLD, not that the byte count is
+        // zero.
+        assertEquals("only the emptied file's bytes count", 100L, r.freed)
+        assertTrue("the session dir itself survives", File(filesDir, "minis-sessions/P").exists())
     }
 
     @Test
