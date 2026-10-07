@@ -181,6 +181,53 @@ class ViewModelInitOrderTest {
     }
 
     @Test
+    fun `a function-local is not a class-body property`() {
+        // The exact false positive the indentation-only scan produced: a top-level
+        // function in the same file declares `val w` / `val threshold` / `val line` at
+        // four spaces — the indent a class member uses — and the load path happens to
+        // mention those names. Only brace depth separates the two.
+        val lines = buildString {
+            appendLine("class T {")
+            appendLine("    private val first = 1")
+            appendLine("    init {")
+            appendLine("        loadSession()")
+            appendLine("    }")
+            appendLine("}")
+            appendLine("internal fun warmUpBudget(window: Int?, compactThreshold: Int?): Int? {")
+            appendLine("    val w = window ?: return null")
+            appendLine("    val threshold = compactThreshold ?: return null")
+            appendLine("    val line = if (threshold > 0) threshold else w")
+            appendLine("    return line")
+            appendLine("}")
+            appendLine("fun loadSession() {")
+            appendLine("    foo(w, threshold, line)")
+            appendLine("}")
+        }.lines()
+        assertEquals(emptyList<String>(), ChatViewModelInitOrderScan.offenders(lines, listOf("loadSession")))
+    }
+
+    @Test
+    fun `a class-body property inside a nested block is not at depth one`() {
+        // A property-looking declaration inside init/lambda braces is not a class member
+        // either; depth 1 is the class body and nothing else.
+        val lines = buildString {
+            appendLine("class T {")
+            appendLine("    init {")
+            appendLine("        loadSession()")
+            appendLine("    }")
+            appendLine("    fun helper() {")
+            appendLine("        val needed = setOf(1)")
+            appendLine("        foo(needed)")
+            appendLine("    }")
+            appendLine("}")
+            appendLine("fun loadSession() {")
+            appendLine("    foo(needed)")
+            appendLine("}")
+        }.lines()
+        assertEquals(emptyList<String>(), ChatViewModelInitOrderScan.offenders(lines, listOf("loadSession")))
+    }
+
+    @Test
     fun `lazy properties are exempt because they resolve on first read`() {
         // The real file's head does exactly this, and it is correct: a `by lazy` field
         // resolves when first read, so its position in the class body is irrelevant.

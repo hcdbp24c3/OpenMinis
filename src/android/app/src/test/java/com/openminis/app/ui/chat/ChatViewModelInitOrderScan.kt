@@ -71,15 +71,63 @@ internal object ChatViewModelInitOrderScan {
         if (init < 0) return emptyList()
         val scope = scrub(readPathScope(lines.joinToString("\n"), functions))
 
+        // Two things separate a class-body property from a function-local here, and
+        // neither works alone: a top-level function's body sits at the SAME depth 1 as a
+        // class body (`warmUpBudget` declares `val w` / `val threshold` / `val line`
+        // exactly there), and indentation is identical at four spaces. Depth within the
+        // CLASS BODY is the rule: a member is depth 1, a local of one of its functions is
+        // depth 2, and anything outside the class is not a member at all.
+        val depth = depths(lines)
+        val classBody = classBodyRange(lines)
+
         val out = mutableListOf<String>()
         for ((i, line) in lines.withIndex()) {
             val lineNo = i + 1
             if (lineNo <= init) continue
+            if (depth[i] != 1) continue
+            if (classBody != null && i !in classBody) continue
             val m = Regex("""^    (?:private |internal )?(?:val|var) (\w+)\s*(?::[^=]+)?""").find(line) ?: continue
             if ('=' !in line) continue
             if ("by lazy" in line) continue
             val name = m.groupValues[1]
             if (isBareRead(scope, name)) out.add("$name (line $lineNo)")
+        }
+        return out
+    }
+
+    /**
+     * Zero-based line range of the class body — the lines after a top-level
+     * `class … {` up to the line that closes it. Null when the file declares no class.
+     */
+    internal fun classBodyRange(lines: List<String>): IntRange? {
+        val depth = depths(lines)
+        for (i in lines.indices) {
+            if (depth[i] != 0) continue
+            val head = lines[i].trimStart()
+            if (!Regex("""^(?:internal |private |open |abstract |sealed |data )*class \w+""").containsMatchIn(head)) continue
+            var end = i
+            while (end + 1 < lines.size && depth[end + 1] > 0) end++
+            return (i + 1)..end
+        }
+        return null
+    }
+
+    /**
+     * Brace depth at the START of each line, with comments and string-literal text
+     * removed first — a `{` inside a log string or a KDoc example must not move the
+     * class body. [scrub] keeps the newlines it removes, so scrubbed line N is still
+     * source line N.
+     */
+    internal fun depths(lines: List<String>): IntArray {
+        val scrubbed = scrub(lines.joinToString("\n")).split("\n")
+        val out = IntArray(lines.size)
+        var depth = 0
+        for (i in lines.indices) {
+            out[i] = depth
+            for (c in scrubbed.getOrElse(i) { "" }) {
+                if (c == '{') depth++
+                else if (c == '}') depth--
+            }
         }
         return out
     }
@@ -107,10 +155,18 @@ internal object ChatViewModelInitOrderScan {
             when {
                 c == '/' && i + 1 < code.length && code[i + 1] == '/' -> {
                     while (i < code.length && code[i] != '\n') i++
+                    // Keep the newline: callers index the scrubbed text by source line.
+                    if (i < code.length) {
+                        out.append('\n')
+                        i++
+                    }
                 }
                 c == '/' && i + 1 < code.length && code[i + 1] == '*' -> {
                     i += 2
-                    while (i + 1 < code.length && !(code[i] == '*' && code[i + 1] == '/')) i++
+                    while (i + 1 < code.length && !(code[i] == '*' && code[i + 1] == '/')) {
+                        if (code[i] == '\n') out.append('\n')
+                        i++
+                    }
                     i = minOf(i + 2, code.length)
                 }
                 c == '"' || c == '\'' -> i = copyInterpolations(code, i, out)
@@ -135,6 +191,8 @@ internal object ChatViewModelInitOrderScan {
             }
             if (triple && code.startsWith("\"\"\"", i)) return i + 3
             if (!triple && code[i] == quote) return i + 1
+            // Keep the line break so scrubbed line N is still source line N.
+            if (code[i] == '\n') out.append('\n')
             if (code[i] == '$') {
                 if (i + 1 < code.length && code[i + 1] == '{') {
                     val close = code.indexOf('}', i + 2)
