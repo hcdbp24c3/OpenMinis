@@ -109,6 +109,10 @@ class ModelsDevApiNormalizationTest {
                     contextWindow = 1_000_000,
                     maxOutputTokens = 384_000,
                     supportsReasoning = true,
+                    // [OpenMinis#438] What OpenAIModelsApi sets for an entry
+                    // that described itself; without it the catalog-first rule
+                    // for built-in literals applies (ReportedModelLimitsTest).
+                    limitsReportedByEndpoint = true,
                 ),
             ),
         )
@@ -117,6 +121,35 @@ class ModelsDevApiNormalizationTest {
         assertEquals("API context must survive enrichment", 1_000_000, model.contextWindow)
         assertEquals("API max output must survive enrichment", 384_000, model.maxOutputTokens)
         assertEquals("API reasoning must survive enrichment", true, model.supportsReasoning)
+    }
+
+    @Test
+    fun apiReasoningFalseSurvivesACatalogTrue() {
+        ModelsDevApi.setRegistryForTesting(
+            mapOf("p" to provider("p", "some-model" to devEntry("some-model", contextWindow = 64_000, reasoning = true))),
+        )
+        val out = ModelsDevApi.enrichModels(
+            listOf(LLMModel("some-model", "M", "Custom", supportsReasoning = false, limitsReportedByEndpoint = true)),
+        )[0]
+        assertEquals("the endpoint said no reasoning", false, out.supportsReasoning)
+        assertEquals("the catalog still fills the window it left out", 64_000, out.contextWindow)
+    }
+
+    @Test
+    fun suffixedIdThatTheCatalogSpellsVerbatimIsNotAnsweredWithItsBaseModel() {
+        // `model-x:free` and `model-x` are different catalog entries; the exact
+        // spelling must win over every shortened or normalized candidate.
+        ModelsDevApi.setRegistryForTesting(
+            mapOf(
+                "a" to provider(
+                    "a",
+                    "model-x" to devEntry("model-x", contextWindow = 1_000_000),
+                    "model-x:free" to devEntry("model-x:free", contextWindow = 200_000),
+                ),
+            ),
+        )
+        val out = ModelsDevApi.enrichModels(listOf(LLMModel("model-x:free", "M", "Custom")))[0]
+        assertEquals(200_000, out.contextWindow)
     }
 
     @Test

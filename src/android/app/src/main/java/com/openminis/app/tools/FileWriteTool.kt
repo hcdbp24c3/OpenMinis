@@ -97,19 +97,29 @@ object FileWriteTool {
             // materialized lazily, so a fresh session writing into
             // /var/minis/workspace/foo/bar.md would otherwise hit "Parent
             // directory does not exist" on the very first call.
-            val parent = file.parentFile
-            if (parent != null && (createDirs || !parent.exists())) {
-                parent.mkdirs()
-            }
+            // [T-port-filetool-size-guard] The write runs off the caller's
+            // thread with a timeout, so a write to an unresponsive mounted
+            // folder no longer holds the agent loop forever.
+            try {
+                FileToolIO.run("Writing $path", writes = true) {
+                    val parent = file.parentFile
+                    if (parent != null && (createDirs || !parent.exists())) {
+                        parent.mkdirs()
+                    }
 
-            // [T-coding-m2-undo] Keep what the file looked like before this
-            // write so file_undo can put it back. Never throws.
-            FileJournal.record(FileJournal.dir(context, sessionId), path, file)
+                    // [T-coding-m2-undo] Keep what the file looked like before this
+                    // write so file_undo can put it back. Never throws. Inside the
+                    // timed block: the backup copy is file IO on the same mount.
+                    FileJournal.record(FileJournal.dir(context, sessionId), path, file)
 
-            if (append) {
-                file.appendText(content)
-            } else {
-                file.writeText(content)
+                    if (append) {
+                        file.appendText(content)
+                    } else {
+                        file.writeText(content)
+                    }
+                }
+            } catch (e: FileToolIO.TimedOut) {
+                return ToolExecutionResult("Error: ${e.message}", false, toolTitle = toolTitle, timedOut = true)
             }
 
             val bytes = file.length()

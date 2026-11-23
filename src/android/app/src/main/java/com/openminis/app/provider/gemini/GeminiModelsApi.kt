@@ -12,7 +12,17 @@ import okhttp3.Request
 import org.json.JSONObject
 
 object GeminiModelsApi {
-    private val client = OkHttpClient()
+    // [T-android-model-list-timeouts] Explicit timeouts for the model list.
+    // The OkHttp default is a 10 s read timeout, and a gateway that builds its
+    // list on demand (Open WebUI style, measured 12.3 s uncached) blew through
+    // it: the refresh failed and the old list stayed. NetworkHttp.client
+    // derives the routed client from this one (newBuilder), so the timeouts
+    // carry over to every route.
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .callTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
     private val cache = ProviderModelsCache("gemini")
 
     /**
@@ -38,6 +48,9 @@ object GeminiModelsApi {
         cloudCodeFallback: Boolean = false,
         context: Context? = null,
         forceRefresh: Boolean = false,
+        // [FEAT-261021-16] The instance's Settings > Network tag (prov:<id>);
+        // null follows the default route.
+        netTag: String? = null,
     ): List<LLMModel> = withContext(Dispatchers.IO) {
         if (cloudCodeFallback) return@withContext LLMModel.allGemini
 
@@ -56,7 +69,7 @@ object GeminiModelsApi {
 
         // [T-android-default-ua] brand outbound /v1beta/models request.
         builder.applyUserAgentOverride(null)
-        val response = client.newCall(builder.build()).execute()
+        val response = com.openminis.app.network.NetworkHttp.client(netTag, client).newCall(builder.build()).execute()
         val body = response.body?.string() ?: return@withContext LLMModel.allGemini
 
         if (!response.isSuccessful) {

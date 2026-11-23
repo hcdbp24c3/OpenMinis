@@ -89,11 +89,11 @@ class ModelSearchTest {
         // shares no subsequence with it, so the section can survive only
         // through the label hit — and it survives WHOLE.
         val r = ModelSearch.search(
-            listOf("host.example.com" to listOf(entry("/models/Qwen3.8-27B.gguf")), "Other" to listOf(entry("gpt-5"))),
+            listOf("llm.example.net" to listOf(entry("/models/Qwen3.8-27B.gguf")), "Other" to listOf(entry("gpt-5"))),
             label = { it },
-            query = "host",
+            query = "example",
         )
-        assertEquals(listOf("host.example.com"), r.sections.map { it.key })
+        assertEquals(listOf("llm.example.net"), r.sections.map { it.key })
         assertEquals(1, r.sections.single().entries.size)
     }
 

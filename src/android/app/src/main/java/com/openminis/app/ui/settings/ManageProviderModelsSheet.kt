@@ -307,7 +307,13 @@ fun ManageProviderModelsSheet(
         MinisAlertDialog(
             onDismissRequest = { entryToDelete = null },
             title = stringResource(R.string.provider_detail_delete_model),
-            text = stringResource(R.string.provider_detail_delete_model_confirm, e.model.displayName),
+            // [T-android-hidden-models-group] An API-listed model is only gone
+            // until the provider lists it again; say so (upstream 1.15).
+            text = stringResource(
+                if (e.isCustom) R.string.provider_detail_delete_model_confirm
+                else R.string.provider_detail_delete_api_model_confirm,
+                e.model.displayName,
+            ),
             confirmText = stringResource(R.string.common_delete),
             isDestructive = true,
             onConfirm = {
@@ -336,15 +342,12 @@ private fun ManageModelRow(
             // custom entries — so non-custom rows get a plain click (no dead
             // long-press that used to show a redundant Hide/Show item; the eye
             // toggle already covers hidden state).
-            .then(
-                if (entry.isCustom) {
-                    Modifier.combinedClickable(
-                        onClick = onClick,
-                        onLongClick = { onMenuEntryIdChange(entry.id) },
-                    )
-                } else {
-                    Modifier.clickable(onClick = onClick)
-                },
+            // [T-android-hidden-models-group] (upstream 1.15) Delete is offered
+            // for every entry, custom or API-listed, so every row has the
+            // long-press menu.
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = { onMenuEntryIdChange(entry.id) },
             ),
     ) {
         Row(
@@ -388,27 +391,25 @@ private fun ManageModelRow(
             // Hide/Show menu item removed on purpose: the eye IconButton on the
             // same row already toggles hidden state, and showing it twice
             // (long-press + eye) confused which control was authoritative.
-            if (entry.isCustom) {
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            stringResource(R.string.common_delete),
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Filled.Delete,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
-                        )
-                    },
-                    onClick = {
-                        onMenuEntryIdChange(null)
-                        onDeleteRequest(entry)
-                    },
-                )
-            }
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        stringResource(R.string.common_delete),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        Icons.Filled.Delete,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                },
+                onClick = {
+                    onMenuEntryIdChange(null)
+                    onDeleteRequest(entry)
+                },
+            )
         }
     }
 }

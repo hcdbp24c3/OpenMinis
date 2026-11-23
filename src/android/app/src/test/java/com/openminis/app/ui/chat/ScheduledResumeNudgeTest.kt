@@ -1,9 +1,10 @@
 package com.openminis.app.ui.chat
 
+import com.openminis.app.IosSources
+import com.openminis.app.ProductionSources
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import com.openminis.app.ProductionSources
 
 /**
  * [T-android-scheduled-resume-nudge] Port of iOS c9131e862's resume nudge: after a
@@ -32,12 +33,19 @@ class ScheduledResumeNudgeTest {
 
     private val vm by lazy { ProductionSources.read("ui/chat/ChatViewModel.kt") }
 
-    @Test fun `nudge is a hidden system reminder`() {
+    @Test fun `nudge text is the iOS text verbatim and hidden`() {
+        // Wherever iOS declares it (f492946c7 moved it to ChatStoreModels.swift);
+        // a missing declaration fails instead of comparing the whole file.
+        if (IosSources.root != null) {
+            val decl = "static let scheduledResumeNudgeText ="
+            val iosText = IosSources.declaring(decl).substringAfter(decl).substringAfter("\"").substringBefore("\"\n")
+            assertTrue("iOS: $iosText", iosText == ChatMessage.SCHEDULED_RESUME_NUDGE_TEXT)
+        }
+        assertTrue(ChatMessage.SCHEDULED_RESUME_NUDGE_TEXT.startsWith("<system-reminder>"))
+        // (fork) It is appended as a "user" message; the reminder tags are what keep it
+        // out of the transcript, so a stray tag in the middle would show a bubble.
         val nudge = ChatMessage.SCHEDULED_RESUME_NUDGE_TEXT
-        assertTrue(nudge, nudge.startsWith("<system-reminder>"))
         assertTrue(nudge, nudge.endsWith("</system-reminder>"))
-        // It is appended as a "user" message; the reminder tags are what keep it out of
-        // the transcript, so a stray tag in the middle would show a bubble.
         assertFalse(nudge, nudge.drop(1).contains("<system-reminder>"))
     }
 
