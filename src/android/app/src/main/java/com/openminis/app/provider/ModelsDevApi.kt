@@ -212,6 +212,104 @@ object ModelsDevApi {
     ): ModelDevEntry? {
         val keys = providerKeyMap[provider] ?: emptyList()
         val wanted = normalizedModelKey(modelId)
+        // [T-android-modelsdev-lookup-index] Built once per registry snapshot;
+        // every lookup below that used to sort + normalize a provider's ids
+        // (per model, and again per alias candidate) reads it instead.
+        val lookup = registryIndex(registry)
+
+        // [T-android-modelsdev-id-normalization] Stages 1-3 of iOS
+        // ModelsDevAPI.resolveDevModel, in its order.
+        //
+        // Stage 1: the model's OWN provider — exact id, then normalized id.
+        for (key in keys) {
+            val prov = registry[key] ?: continue
+            prov.models[modelId]?.let { return it }
+            lookup.normalizedFirst[key]?.get(wanted)?.let { return it }
+        }
+        // Stage 2: every provider, on the NORMALIZED id, majority vote over
+        // the declared effort sets. This is what a relay hits: its provider
+        // name maps to no catalog key and its id carries a namespace
+        // (`code-buddy/deepseek-v4.1-flash`) that no catalog id spells.
+        // [T-model-metadata-from-api] (fork) An id the catalog publishes
+        // VERBATIM wins before any normalization: the vote among providers
+        // that spell it exactly this way (vendor path and suffix included).
+        // Without this the normalized vote below could answer
+        // `vendor/model` with the entry of a differently spelled `model`.
+        exactIndex(registry)[modelId]?.let { return it }
+        val index = stage2Index(registry)
+        index[wanted]?.let { return it }
+        // Stage 3: longest catalogued prefix at a segment boundary.
+        prefixMatch(wanted, index)?.let { return it }
+
+        // Pre-normalization alias walk on the raw id, kept as a further
+        // fallback so nothing that resolved before stops resolving.
+        for (candidate in aliasCandidates(modelId)) {
+            for (key in keys) {
+                resolveDevModel(lookup, key, candidate)?.let { return it }
+            }
+            // Same stable-pick rule as the exact path: sort by provider key and
+            // prefer an entry that actually declares reasoning metadata, so the
+            // richer of several duplicate publications wins.
+            //
+            // [T-model-metadata-from-api] Providers are matched by their
+            // NORMALIZED key too (vendor prefix stripped, '.'/'_' folded to
+            // '-'), so a relay id like `deepseek/deepseek-flash` finds the
+            // catalog entry `deepseek-flash`. resolveDevModel tries the exact
+            // id inside a provider first, so a real exact entry still wins.
+            // First entry declaring effort tiers, else the first entry, walking
+            // the providers in sorted order - without materializing the list.
+            var first: ModelDevEntry? = null
+            var declaring: ModelDevEntry? = null
+            for (provKey in lookup.sortedProviderKeys) {
+                val hit = resolveDevModel(lookup, provKey, candidate) ?: continue
+                if (first == null) first = hit
+                if (!hit.reasoningEffortValues.isNullOrEmpty()) {
+                    declaring = hit
+                    break
+                }
+            }
+            (declaring ?: first)?.let { return it }
+        }
+
+        // [T-android-modelsdev-aggregate-fallback] Stage 3, for UNRECOGNIZED
+        // providers only.
+        //
+        // Stages 1 and 2 both need some catalog id to equal the requested one,
+        // exactly or after shortening. A relay that renames a model beyond any
+        // shared prefix still matches nothing, and the model arrives with no
+        // context window, no output cap, no reasoning flag and no modalities —
+        // the reported `unknown_path` on every field.
+        //
+        // Gated on `isUnrecognizedProvider` deliberately: an aggregate is a
+        // MAXIMUM over a family, so applying it to a direct OpenAI or Anthropic
+        // connection could overwrite a precisely-known context window with a
+        // larger sibling's. Those providers have a real catalog identity and
+        // must keep getting the exact answer or none at all.
+        if (!isUnrecognizedProvider(provider)) return null
+        val aggIndex = aggregateIndex(registry)
+        for (candidate in normalizedPrefixes(wanted) + aliasCandidates(modelId)) {
+            aggIndex[candidate]?.let {
+                Log.i(TAG, "aggregate fallback: $modelId -> prefix $candidate")
+                return it
+            }
+        }
+        return null
+    }
+
+    /**
+     * [T-android-modelsdev-lookup-index] The pre-index body of
+     * [resolveDevEntry], kept verbatim as the reference the unit test compares
+     * the indexed version against (ModelsDevLookupIndexTest). Not used by the
+     * app: for each alias candidate it sorts the provider keys and, per
+     * provider, re-sorts and re-normalizes every model id.
+     */
+    internal fun resolveDevEntryReference(
+        registry: Map<String, ProviderEntry>,
+        provider: String,
+        modelId: String,
+    ): ModelDevEntry? {
+        val keys = providerKeyMap[provider] ?: emptyList()
+        val wanted = normalizedModelKey(modelId)
 
         // [T-android-modelsdev-id-normalization] Stages 1-3 of iOS
         // ModelsDevAPI.resolveDevModel, in its order.
@@ -244,7 +342,7 @@ object ModelsDevApi {
         for (candidate in aliasCandidates(modelId)) {
             for (key in keys) {
                 val prov = registry[key] ?: continue
-                resolveDevModel(prov, candidate)?.let { return it }
+                resolveDevModelReference(prov, candidate)?.let { return it }
             }
             // Same stable-pick rule as the exact path: sort by provider key and
             // prefer an entry that actually declares reasoning metadata, so the
@@ -256,7 +354,7 @@ object ModelsDevApi {
             // catalog entry `deepseek-flash`. resolveDevModel tries the exact
             // id inside a provider first, so a real exact entry still wins.
             val candidates = registry.keys.sorted().mapNotNull { provKey ->
-                registry[provKey]?.let { resolveDevModel(it, candidate) }
+                registry[provKey]?.let { resolveDevModelReference(it, candidate) }
             }
             val best = candidates.firstOrNull { !it.reasoningEffortValues.isNullOrEmpty() }
                 ?: candidates.firstOrNull()
@@ -281,7 +379,6 @@ object ModelsDevApi {
         val aggIndex = aggregateIndex(registry)
         for (candidate in normalizedPrefixes(wanted) + aliasCandidates(modelId)) {
             aggIndex[candidate]?.let {
-                Log.i(TAG, "aggregate fallback: $modelId -> prefix $candidate")
                 return it
             }
         }
@@ -604,13 +701,80 @@ object ModelsDevApi {
      * differs from its normalized form (avoids false positives on ids
      * that are already normalized). Deterministic within a provider:
      * colliding normalized keys pick the alphabetically first.
+     *
+     * [T-android-modelsdev-lookup-index] The normalized half reads
+     * [RegistryIndex.normalizedFirst]; same answer as
+     * [resolveDevModelReference].
      */
-    private fun resolveDevModel(prov: ProviderEntry, modelId: String): ModelDevEntry? {
+    private fun resolveDevModel(index: RegistryIndex, provKey: String, modelId: String): ModelDevEntry? {
+        val prov = index.registry[provKey] ?: return null
+        prov.models[modelId]?.let { return it }
+        val wanted = normalizedModelKey(modelId)
+        if (wanted == modelId) return null
+        return index.normalizedFirst[provKey]?.get(wanted)
+    }
+
+    /** The pre-index logic of [resolveDevModel]; reference for the unit test only. */
+    internal fun resolveDevModelReference(prov: ProviderEntry, modelId: String): ModelDevEntry? {
         prov.models[modelId]?.let { return it }
         val wanted = normalizedModelKey(modelId)
         if (wanted == modelId) return null
         return prov.models.keys.sorted().firstOrNull { normalizedModelKey(it) == wanted }
             ?.let { prov.models[it] }
+    }
+
+    /**
+     * [T-android-modelsdev-lookup-index] What [resolveDevEntry] used to
+     * recompute per model and per alias candidate, built once per registry
+     * snapshot. Enriching a 3,000-model gateway list walks several thousand
+     * alias candidates; for each one the old code sorted the provider keys
+     * and, for every provider, sorted and normalized all of its model ids.
+     *
+     *  - [sortedProviderKeys]: `registry.keys.sorted()`.
+     *  - [normalizedFirst]: per provider, normalized id -> the entry of the
+     *    FIRST id in sorted order with that normalized form, i.e. exactly what
+     *    `keys.sorted().firstOrNull { normalizedModelKey(it) == wanted }` picked.
+     */
+    internal class RegistryIndex(
+        val registry: Map<String, ProviderEntry>,
+        val sortedProviderKeys: List<String>,
+        val normalizedFirst: Map<String, Map<String, ModelDevEntry>>,
+    )
+
+    private var cachedRegistryIndex: RegistryIndex? = null
+    private var registryIndexBuiltFrom: Long = -1L
+
+    /** How many times the index was built; lets a test see that it is reused. */
+    @Volatile
+    internal var registryIndexBuilds: Int = 0
+        private set
+
+    internal fun buildRegistryIndex(registry: Map<String, ProviderEntry>): RegistryIndex {
+        val sortedKeys = registry.keys.sorted()
+        val normalizedFirst = HashMap<String, Map<String, ModelDevEntry>>(sortedKeys.size * 2)
+        for (provKey in sortedKeys) {
+            val prov = registry[provKey] ?: continue
+            val byNorm = HashMap<String, ModelDevEntry>(prov.models.size * 2)
+            for (id in prov.models.keys.sorted()) {
+                val entry = prov.models[id] ?: continue
+                val norm = normalizedModelKey(id)
+                if (!byNorm.containsKey(norm)) byNorm[norm] = entry
+            }
+            normalizedFirst[provKey] = byNorm
+        }
+        return RegistryIndex(registry, sortedKeys, normalizedFirst)
+    }
+
+    /** Same snapshot rule as [stage2Index]: same timestamp AND the same registry object. */
+    internal fun registryIndex(registry: Map<String, ProviderEntry>): RegistryIndex {
+        val cached = cachedRegistryIndex
+        if (cached != null && registryIndexBuiltFrom == cacheTimestamp && cached.registry === registry) return cached
+        val built = buildRegistryIndex(registry)
+        cachedRegistryIndex = built
+        registryIndexBuiltFrom = cacheTimestamp
+        registryIndexBuilds++
+        Log.i(TAG, "registry lookup index built: ${built.sortedProviderKeys.size} providers")
+        return built
     }
 
     /**

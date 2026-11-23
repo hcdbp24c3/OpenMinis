@@ -58,6 +58,9 @@ import kotlinx.serialization.json.Json
 // Modality bit layout — must match src/ios/Providers/LLMTypes.swift
 // ModelModality OptionSet rawValue exactly. Used by export/import to
 // transmit modality info as a single Int that iOS can decode.
+/** [T-android-refresh-log-trim] Ids shown per diagnostic line. */
+private const val DIAG_SAMPLE = 10
+
 private const val MODALITY_BIT_TEXT_IN = 1 shl 0
 private const val MODALITY_BIT_TEXT_OUT = 1 shl 1
 private const val MODALITY_BIT_IMG_IN = 1 shl 2
@@ -1198,6 +1201,21 @@ class ProviderRepository(private val context: Context) {
         return instance.isEnabled
     }
 
+    /**
+     * [T-android-refresh-log-trim] A list for a diagnostic line: its size and
+     * the first [DIAG_SAMPLE] ids. The DIAG lines used to join the WHOLE list
+     * (and one of them logged per model), which on a 3,000-model gateway built
+     * several multi-hundred-KB strings per refresh that logcat then truncated.
+     */
+    private inline fun <T> diagSummary(items: List<T>, id: (T) -> String): String {
+        val sample = ArrayList<String>(DIAG_SAMPLE)
+        for (item in items) {
+            if (sample.size == DIAG_SAMPLE) break
+            sample.add(id(item))
+        }
+        return "count=${items.size} first=$sample"
+    }
+
     fun replaceEntries(instanceId: String, models: List<LLMModel>) = synchronized(configLock) {
         ensureConfigLoaded()
         // Hot path for concurrent autoRefreshModels coroutines (one per
@@ -1207,8 +1225,8 @@ class ProviderRepository(private val context: Context) {
         // [DIAG-restore] Function entry: exactly what was passed in.
         android.util.Log.i(
             "ProviderRepo",
-            "[Restore][DIAG] replaceEntries ENTER instanceId=$instanceId models=" +
-                models.joinToString { m -> "(id=${m.id}, displayName=${m.displayName})" },
+            "[Restore][DIAG] replaceEntries ENTER instanceId=$instanceId models " +
+                diagSummary(models) { it.id },
         )
         val config = workingCopy()
         val existing = config.modelEntries.filter { it.providerInstanceId == instanceId }
@@ -1218,10 +1236,8 @@ class ProviderRepository(private val context: Context) {
         // right before this refresh, i.e. what removeAll below is meant to wipe.
         android.util.Log.i(
             "ProviderRepo",
-            "[Restore][DIAG] replaceEntries existing(before) instanceId=$instanceId count=${existing.size}: " +
-                existing.joinToString { e ->
-                    "(baseModel.id=${e.baseModel.id}, displayName=${e.baseModel.displayName}, uuid=${e.id}, isCustom=${e.isCustom})"
-                },
+            "[Restore][DIAG] replaceEntries existing(before) instanceId=$instanceId " +
+                diagSummary(existing) { it.baseModel.id },
         )
 
         // Build lookup: baseModel.id → existing entry (prefer non-custom if duplicates exist)
@@ -1246,17 +1262,17 @@ class ProviderRepository(private val context: Context) {
             ?.filter { it.hasVoiceModality }
             ?.associateBy { it.id }
             ?: emptyMap()
+        // [DIAG-restore] Lookup outcome against the existing-entries map built
+        // above, as ONE line: how many refreshed ids already had an entry.
+        // [T-android-refresh-log-trim] This was a Log.i per model, i.e. 3,000+
+        // lines on a large gateway for every refresh.
+        android.util.Log.i(
+            "ProviderRepo",
+            "[Restore][DIAG] replaceEntries lookup instanceId=$instanceId models=${models.size} " +
+                "hits=${models.count { existingByModelId.containsKey(it.id) }}",
+        )
         val newEntries = models.map { model ->
             val prior = existingByModelId[model.id]
-            // [DIAG-restore] Lookup outcome for this model.id against the
-            // existing-entries map built above — the crux of the "duplicate
-            // instead of replace" investigation: was `model.id` recognized as
-            // already having an entry, and if so, whose?
-            android.util.Log.i(
-                "ProviderRepo",
-                "[Restore][DIAG] replaceEntries lookup key=${model.id} hit=${prior != null}" +
-                    (if (prior != null) " prior.baseModel.id=${prior.baseModel.id}" else ""),
-            )
             // Dedicated ASR/TTS id/name patterns fill the exact voice shape when
             // the API returned no modality info; the template's shape wins last.
             var resolved = model.withInferredVoiceModality()
@@ -1300,8 +1316,8 @@ class ProviderRepository(private val context: Context) {
             // entries not present in the refreshed list are kept as-is.
             android.util.Log.i(
                 "ProviderRepo",
-                "[Restore][DIAG] replaceEntries remainingCustom BRANCH HIT instanceId=$instanceId count=${remainingCustom.size}: " +
-                    remainingCustom.joinToString { e -> "(baseModel.id=${e.baseModel.id}, uuid=${e.id})" },
+                "[Restore][DIAG] replaceEntries remainingCustom BRANCH HIT instanceId=$instanceId " +
+                    diagSummary(remainingCustom) { it.baseModel.id },
             )
         }
 
@@ -1321,8 +1337,8 @@ class ProviderRepository(private val context: Context) {
             // voice-template seed entries not returned by /models.
             android.util.Log.i(
                 "ProviderRepo",
-                "[Restore][DIAG] replaceEntries preservedVoice BRANCH HIT instanceId=$instanceId count=${preservedVoice.size}: " +
-                    preservedVoice.joinToString { e -> "(baseModel.id=${e.baseModel.id}, uuid=${e.id})" },
+                "[Restore][DIAG] replaceEntries preservedVoice BRANCH HIT instanceId=$instanceId " +
+                    diagSummary(preservedVoice) { it.baseModel.id },
             )
         }
 
@@ -1381,8 +1397,8 @@ class ProviderRepository(private val context: Context) {
         // the predicate itself (providerInstanceId matching) is the suspect.
         android.util.Log.i(
             "ProviderRepo",
-            "[Restore][DIAG] replaceEntries removeAll about to remove instanceId=$instanceId count=${entriesToRemove.size} ids=" +
-                entriesToRemove.map { it.baseModel.id },
+            "[Restore][DIAG] replaceEntries removeAll about to remove instanceId=$instanceId " +
+                diagSummary(entriesToRemove) { it.baseModel.id },
         )
         config.modelEntries.removeAll { it.providerInstanceId == instanceId }
         // [DIAG-restore] Post-removeAll / pre-addAll: should be 0 for this
@@ -1405,10 +1421,8 @@ class ProviderRepository(private val context: Context) {
         val finalForInstance = config.modelEntries.filter { it.providerInstanceId == instanceId }
         android.util.Log.i(
             "ProviderRepo",
-            "[Restore][DIAG] replaceEntries FINAL instanceId=$instanceId count=${finalForInstance.size}: " +
-                finalForInstance.joinToString { e ->
-                    "(baseModel.id=${e.baseModel.id}, displayName=${e.baseModel.displayName}, uuid=${e.id})"
-                },
+            "[Restore][DIAG] replaceEntries FINAL instanceId=$instanceId " +
+                diagSummary(finalForInstance) { it.baseModel.id },
         )
 
         // Prune stale group member references
@@ -2878,8 +2892,8 @@ class ProviderRepository(private val context: Context) {
             // exactly as returned before it reaches replaceEntries.
             android.util.Log.i(
                 "ProviderRepo",
-                "[Restore][DIAG] refreshModels STEP1(vendor-api) id=${instance.id} models=" +
-                    models.joinToString { m -> "(id=${m.id}, displayName=${m.displayName})" },
+                "[Restore][DIAG] refreshModels STEP1(vendor-api) id=${instance.id} models " +
+                    diagSummary(models) { it.id },
             )
 
             // Step 2: If API returned results, use them
@@ -2904,8 +2918,8 @@ class ProviderRepository(private val context: Context) {
             // [DIAG-restore] Step3 (models.dev fallback) raw model list.
             android.util.Log.i(
                 "ProviderRepo",
-                "[Restore][DIAG] refreshModels STEP3(models.dev-fallback) id=${instance.id} models=" +
-                    fallbackModels.joinToString { m -> "(id=${m.id}, displayName=${m.displayName})" },
+                "[Restore][DIAG] refreshModels STEP3(models.dev-fallback) id=${instance.id} models " +
+                    diagSummary(fallbackModels) { it.id },
             )
             replaceEntries(instance.id, fallbackModels)
             return ModelRefreshSource.MODELS_DEV
