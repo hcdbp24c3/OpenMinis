@@ -158,4 +158,11 @@ class SessionProjectTest {
         assertTrue(runtime > 0)
         assertTrue("project block must come after the Runtime context header", project > runtime)
     }
+
+    // git and ripgrep ship in the rootfs (scripts/prepare_android_sandbox.sh), so
+    // the project guidance must not spend tokens telling the model to install them.
+    @Test
+    fun `coding guidance does not tell the model to install tools`() {
+        assertFalse(SessionProject.CODING_GUIDANCE.contains("apk add"))
+    }
 }

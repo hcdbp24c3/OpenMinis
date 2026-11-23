@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Prepare Android sandbox assets in src/android/app/src/main/assets/:
-#   1. Download the Alpine Linux aarch64 minirootfs
+#   1. Download the Alpine Linux aarch64 minirootfs and bake ROOTFS_PACKAGES
+#      (git, ripgrep) into it — see scripts/android_rootfs_add_packages.py
 #   2. Check that the PRoot binary is present (built by deps/build_proot.sh)
 #   3. Stage jniLibs/arm64-v8a/libproot.so from the proot asset when missing
 #      (RootfsManager requires nativeLibraryDir/libproot.so at runtime; the
@@ -26,6 +27,17 @@ ALPINE_VERSION="3.21"
 ALPINE_RELEASE="3.21.3"
 ALPINE_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/aarch64/alpine-minirootfs-${ALPINE_RELEASE}-aarch64.tar.gz"
 
+# [T-coding-m1-project] Packages installed into the rootfs at build time, so the
+# agent has them on its first command instead of `apk add`-ing them over the
+# network. Dependencies are resolved automatically. Each package here is in
+# every fresh install, so keep the list short: git + ripgrep add ~7 MB to the
+# APK and ~16 MB on the device.
+ROOTFS_PACKAGES="git ripgrep"
+ADD_PACKAGES="$SCRIPT_DIR/android_rootfs_add_packages.py"
+ROOTFS_CACHE_DIR="$PROJECT_ROOT/deps/.cache/android-rootfs"
+ROOTFS_BASE="$ROOTFS_CACHE_DIR/alpine-minirootfs-${ALPINE_RELEASE}-aarch64.tar.gz"
+ROOTFS_STAMP="$ROOTFS_CACHE_DIR/rootfs.stamp"
+
 mkdir -p "$ASSETS_DIR"
 
 ROOTFS_FILE="$ASSETS_DIR/alpine-minirootfs.tar.gz"
@@ -34,12 +46,36 @@ JNILIBS_DIR="$PROJECT_ROOT/src/android/app/src/main/jniLibs/arm64-v8a"
 JNILIBS_PROOT="$JNILIBS_DIR/libproot.so"
 
 # --- Alpine rootfs ---
-if [ -f "$ROOTFS_FILE" ]; then
-    echo "✓ Alpine rootfs already exists: $ROOTFS_FILE"
+# The stamp records what the asset was built from. A rootfs with no stamp is a
+# stock minirootfs left by an older checkout of this script (no git/rg), and a
+# stale stamp means the release, the package list or the tool changed — both
+# are rebuilt. The stamp lives in the cache dir, not in assets/, so it is not
+# packaged into the APK.
+ROOTFS_WANT="alpine=${ALPINE_RELEASE} packages=${ROOTFS_PACKAGES} tool=$(cksum < "$ADD_PACKAGES")"
+if [ -f "$ROOTFS_FILE" ] && [ -f "$ROOTFS_STAMP" ] && [ "$(cat "$ROOTFS_STAMP")" = "$ROOTFS_WANT" ]; then
+    echo "✓ Alpine rootfs already exists (with: $ROOTFS_PACKAGES): $ROOTFS_FILE"
 else
-    echo "Downloading Alpine Linux ${ALPINE_RELEASE} aarch64 minirootfs..."
-    curl -fSL -o "$ROOTFS_FILE" "$ALPINE_URL"
-    echo "✓ Downloaded: $ROOTFS_FILE ($(du -h "$ROOTFS_FILE" | cut -f1))"
+    command -v python3 >/dev/null 2>&1 || {
+        echo "Error: python3 is required to add packages ($ROOTFS_PACKAGES) to the rootfs." >&2
+        exit 1
+    }
+    mkdir -p "$ROOTFS_CACHE_DIR"
+    if [ ! -f "$ROOTFS_BASE" ]; then
+        echo "Downloading Alpine Linux ${ALPINE_RELEASE} aarch64 minirootfs..."
+        curl -fSL -o "$ROOTFS_BASE.part" "$ALPINE_URL"
+        mv "$ROOTFS_BASE.part" "$ROOTFS_BASE"
+    fi
+    echo "Adding packages to the rootfs: $ROOTFS_PACKAGES"
+    rm -f "$ROOTFS_STAMP"
+    # shellcheck disable=SC2086  # ROOTFS_PACKAGES is a word list on purpose
+    python3 "$ADD_PACKAGES" \
+        --base "$ROOTFS_BASE" \
+        --out "$ROOTFS_FILE" \
+        --cache "$ROOTFS_CACHE_DIR/apk" \
+        --alpine-version "$ALPINE_VERSION" \
+        $ROOTFS_PACKAGES
+    printf '%s\n' "$ROOTFS_WANT" > "$ROOTFS_STAMP"
+    echo "✓ Built: $ROOTFS_FILE ($(du -h "$ROOTFS_FILE" | cut -f1))"
 fi
 
 # --- PRoot binary ---

@@ -148,7 +148,6 @@ object SessionProject {
             "- Make targeted edits with file_edit; do not rewrite a whole file to change a few lines.\n" +
             "- After a change, run the project's own checks (tests, lint, build) when they exist and are affordable here, and say what you ran and what it returned. If you could not run them, say so plainly instead of implying they passed.\n" +
             "- Version control: do not commit, push, reset, rebase, stash or discard changes unless the user asked for it.\n" +
-            "- If `git` or `rg` is missing, install it once: `apk add git ripgrep`.\n" +
             "- When you finish, list the files you changed."
 
     // --------------------------------------------------------------- storage
