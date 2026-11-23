@@ -21,30 +21,35 @@ class ProviderDetailHiddenModelsTest {
     private val src = File("src/main/java/com/openminis/app/ui/settings/ProviderDetailScreen.kt").readText()
     private val models = src.substringAfter("// ─── Models ───").substringBefore("MinisOutlinedButton(")
 
+    // (fork) The fork lists a provider's models in ManageProviderModelsSheet
+    // (search, eye toggle, long-press menu) instead of upstream's inline list
+    // with a collapsible "Hidden models (N)" group. The three guards below
+    // assert the same behaviour where the fork implements it.
+    private val sheet = File("src/main/java/com/openminis/app/ui/settings/ManageProviderModelsSheet.kt").readText()
+
     @Test
-    fun `the main list renders visible entries and the hidden group renders hidden ones`() {
-        assertTrue(src.contains("val (visibleEntries, hiddenEntries) = entries.partition { !it.isHidden }"))
-        assertFalse("no row for every entry", models.contains("entries.forEachIndexed"))
-        assertTrue(models.contains("visibleEntries.forEachIndexed"))
-        assertTrue(models.contains("if (hiddenEntries.isNotEmpty())"))
-        assertTrue(models.contains("R.string.provider_detail_hidden_models_group, hiddenEntries.size"))
-        assertTrue("hidden rows only when expanded", models.contains("if (hiddenExpanded) {"))
-        assertTrue(models.contains("hiddenEntries.forEachIndexed"))
-        // Folded per provider: opening another provider starts collapsed.
-        assertTrue(src.contains("var hiddenExpanded by remember(instanceId) { mutableStateOf(false) }"))
+    fun `the models row opens the sheet and hidden entries stay listed, dimmed, with a show toggle`() {
+        assertTrue(models.contains("onClick = { showManageModelsSheet = true }"))
+        assertFalse("no inline row for every entry", models.contains("entries.forEachIndexed"))
+        assertTrue(src.contains("ManageProviderModelsSheet("))
+        assertTrue(sheet.contains("if (entry.isHidden) Modifier.alpha(0.45f) else Modifier"))
+        assertTrue(sheet.contains("if (entry.isHidden) Icons.Default.VisibilityOff else Icons.Default.Visibility"))
     }
 
     @Test
     fun `delete is offered for every model and API models get the come-back warning`() {
         assertFalse("delete is no longer custom-only", src.contains("if (entry.isCustom) {"))
-        assertTrue(Regex("""onClick = \{\s*menuEntryId = null\s*entryToDelete = entry""").containsMatchIn(models))
-        assertTrue(src.contains("if (e.isCustom) R.string.provider_detail_delete_model_confirm"))
-        assertTrue(src.contains("else R.string.provider_detail_delete_api_model_confirm"))
+        assertFalse("delete is no longer custom-only", sheet.contains("if (entry.isCustom) {"))
+        assertTrue(Regex("""onClick = \{\s*onMenuEntryIdChange\(null\)\s*onDeleteRequest\(entry\)""").containsMatchIn(sheet))
+        assertTrue(sheet.contains("onDeleteRequest = { entryToDelete = it }"))
+        assertTrue(sheet.contains("if (e.isCustom) R.string.provider_detail_delete_model_confirm"))
+        assertTrue(sheet.contains("else R.string.provider_detail_delete_api_model_confirm"))
+        assertTrue(sheet.contains("providerRepository.removeEntry(e.id)"))
     }
 
     @Test
     fun `unhiding writes straight through and the absence grace is unchanged`() {
-        assertTrue(src.contains("providerRepository.updateEntry(entry.copy(isHidden = !entry.isHidden))"))
+        assertTrue(sheet.contains("providerRepository.updateEntryAsync(target.copy(isHidden = newHidden))"))
         assertEquals(7L * 24 * 60 * 60 * 1000, ProviderRepository.MODEL_ABSENCE_GRACE_MS)
         val repo = File("src/main/java/com/openminis/app/data/repository/ProviderRepository.kt").readText()
         val remove = repo.substringAfter("fun removeEntry(entryId: String)").substringBefore("// --- Model Group management")

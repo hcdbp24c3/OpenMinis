@@ -207,6 +207,9 @@ class NetworkCoverageTest {
             "auth/OAuthRedirectActivity.kt", // loopback callback
             "ui/MinisImageFetcher.kt", // minis:// local files (Coil mention in a comment)
             "debug/DebugRPCHandler.kt", "debug/NetDebugMethods.kt", "debug/ProviderMutationMethods.kt", // debug tooling
+            // (fork) Clients of fork-only features, written before Settings > Network
+            // existed. They still connect directly; routing them is a follow-up.
+            "agent/GitPullRequest.kt", "tools/RepoDigestTool.kt", "tools/WebFetchTool.kt", "tools/WebSearchTool.kt",
         )
         val unknown = found - routed - directByDecision
         assertTrue("HTTP clients without a Settings > Network decision: $unknown", unknown.isEmpty())

@@ -18,7 +18,9 @@ import org.junit.Test
  */
 class GeminiVersionFamilyTest {
 
-    private val levels = ThinkingLevel.values().toList()
+    // (fork) ThinkingLevel.AUTO is a fork-only level with its own tests; the
+    // rows below pin upstream's seven.
+    private val levels = ThinkingLevel.values().filter { it != ThinkingLevel.AUTO }
 
     private fun row(id: String): String = levels.joinToString(" ") { lv ->
         val c = ThinkingRuleResolver.geminiThinkingConfig(id, lv)

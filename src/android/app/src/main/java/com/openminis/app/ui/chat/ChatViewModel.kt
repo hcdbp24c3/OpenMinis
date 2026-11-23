@@ -18789,7 +18789,10 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
         // [T-android-responses-reasoning-echo] Re-attach the session-stashed
         // encrypted reasoning so a rebuilt history still replays it. Done here,
         // not in ChatHistoryRebuild: the stash is this view model's state.
-        val echo = if (rebuilt.role == LLMMessage.Role.ASSISTANT) reasoningEchoByDbId[id] else null
+        // Nullable on purpose: the image / context fixtures build this class
+        // without running its constructor, so the stash field can be null there.
+        val stash: java.util.concurrent.ConcurrentHashMap<String, ReasoningEcho>? = reasoningEchoByDbId
+        val echo = if (rebuilt.role == LLMMessage.Role.ASSISTANT) stash?.get(id) else null
         return if (echo != null) rebuilt.copy(reasoningEcho = echo) else rebuilt
     }
 
