@@ -14335,6 +14335,21 @@ class ChatViewModel(
             android.util.Log.w("ShellExecDiag",
                 "executeShell dispatch=$dispatchSessionId rawSessionId=$sessionId realSessionId=$realSessionId isDraft=$isDraft cmd=${command.take(120).replace('\n', ' ')}")
 
+            // [T-coding-m1-project] Working directory. An explicit `cwd` runs the
+            // command there and becomes this conversation's project; without one
+            // the command starts in the project already set (or /root, as before,
+            // when there is none). Done BEFORE bashism detection so the `cd` line
+            // is part of what gets bash-wrapped and of the self-heal retry. A sub
+            // agent reads its parent's project (fsSessionId) but never moves it.
+            val projectDir = com.openminis.app.agent.SessionProject.resolveForShell(
+                context = context,
+                sessionId = fsSessionId,
+                cwdArg = if (args.has("cwd")) args.optString("cwd", "") else null,
+                persist = helperConfig == null,
+            )
+            projectDir.error?.let { return ToolExecutionResult(it, false, toolTitle = toolTitle) }
+            projectDir.dir?.let { command = com.openminis.app.agent.SessionProject.wrapCommand(it, command) }
+
             // [T-bash-on-demand] Detect busybox-ash-incompatible bash syntax and,
             // if found, transparently install + switch to bash. Install time is
             // NOT charged against the command timeout (OnDemandBash has its own
@@ -15519,6 +15534,15 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
             append("- Current date: ").append(dateStr).append(" (").append(tzId).append(")\n")
             append("- Device language: ").append(lang).append("\n")
             append("- minis-model-use models available: ").append(modelUseCount)
+            // [T-coding-m1-project] Project directory, coding guidance and the
+            // project's AGENTS.md. Appended AFTER the runtime lines above, never
+            // into `base`: it differs per conversation, so anywhere earlier it
+            // would break the cached prefix for every conversation without one.
+            // Null (no project) appends nothing, leaving the prompt byte-identical
+            // to what it was before this feature.
+            com.openminis.app.agent.SessionProject.promptFragmentFor(context, fsSessionId)?.let {
+                append("\n").append(it)
+            }
         }
     }
 
