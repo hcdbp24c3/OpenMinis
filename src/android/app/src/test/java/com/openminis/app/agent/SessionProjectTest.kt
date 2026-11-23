@@ -133,7 +133,7 @@ class SessionProjectTest {
         val shell = AgentTools.makeAgentTools().first { it.name == "shell_execute" }
         assertTrue(shell.parameters.containsKey("cwd"))
         assertFalse(shell.required.contains("cwd"))
-        assertTrue(shell.propertyOrdering.contains("cwd"))
+        assertTrue(shell.propertyOrdering.orEmpty().contains("cwd"))
     }
 
     // ---------------------------------------------------------- source guards
