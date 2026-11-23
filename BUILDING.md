@@ -200,8 +200,13 @@ mkdir -p src/android/app/libs && cp deps/build/rclone/rclone.aar src/android/app
   Artifacts are **not** byte-identical across NDK releases; the loader's code
   differs between toolchain generations. Functionally equivalent — don't expect
   checksums to match someone else's build.
-- **`prepare_android_sandbox.sh`** downloads the Alpine aarch64 minirootfs into
-  `assets/`.
+- **`prepare_android_sandbox.sh`** downloads the Alpine aarch64 minirootfs and
+  writes it into `assets/` with `git` and `ripgrep` already installed
+  (`scripts/android_rootfs_add_packages.py`, needs `python3` and network access;
+  downloads are cached in `deps/.cache/android-rootfs/`). To preinstall more,
+  edit `ROOTFS_PACKAGES` in the script. The rootfs is only extracted on a fresh
+  install or after a sandbox reset, so an existing install keeps the rootfs it
+  already has.
 - **`build_rclone_android.sh`** binds rclone with gomobile into an `.aar` for
   the backup feature's remote destinations. It needs `ANDROID_NDK_HOME` (or
   `ANDROID_HOME`) set, and it writes to `deps/build/rclone/`; Gradle reads the
