@@ -147,6 +147,8 @@ internal fun friendlyToolTitleFor(toolName: String?): String = when (toolName) {
     "file_read" -> "Read File"
     "file_write" -> "Write File"
     "file_edit" -> "Edit File"
+    "file_undo" -> "Undo File Change"
+    "todo_write" -> "Update Tasks"
     "browser_use" -> "Browse Web"
     "read_image" -> "Read Image"
     "memory_write" -> "Write Memory"

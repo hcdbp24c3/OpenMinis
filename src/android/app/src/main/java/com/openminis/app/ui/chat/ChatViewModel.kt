@@ -13171,6 +13171,16 @@ class ChatViewModel(
                 com.openminis.app.tools.FileUndoTool.execute(argsJson, fsSessionId, context).also {
                     if (it.success) skillRepository?.requestReload("file_undo")
                 }
+            // [T-coding-m2-todo] The task list. Keyed by the conversation that
+            // is running (a sub agent keeps its own, in memory only), so the
+            // card above the composer shows the list of the chat on screen.
+            com.openminis.app.tools.TodoWriteTool.NAME ->
+                com.openminis.app.tools.TodoWriteTool.execute(
+                    argsJson,
+                    activeSessionId,
+                    context,
+                    persist = helperConfig == null,
+                )
             // T178: pass sessionId + context so read_image routes through
             // resolveSessionHostPath like file_read/write/edit do — without
             // these, the tool consults the global last-writer-wins
@@ -17752,6 +17762,7 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
         "file_write" -> "Write File"
         "file_edit" -> "Edit File"
         "file_undo" -> "Undo File Change"
+        "todo_write" -> "Update Tasks"
         "browser_use" -> "Browse Web"
         "read_image" -> "Read Image"
         "memory_write" -> "Write Memory"

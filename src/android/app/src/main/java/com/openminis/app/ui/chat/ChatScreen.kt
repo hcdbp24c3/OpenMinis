@@ -5389,6 +5389,10 @@ fun ChatScreen(
                     .padding(horizontal = 12.dp)
                     .padding(top = 2.dp, bottom = 8.dp),
             ) {
+                // [T-coding-m2-todo] The agent's task list, one row above the
+                // input card; draws nothing while this chat has no list.
+                SessionTodoCard(sessionId = { viewModel.currentSessionId })
+
                 // T13 banner moved INSIDE the LazyColumn so it renders at the
                 // visual end of the message list (mirrors iOS — see the
                 // banner item before items() in the LazyColumn block above).
