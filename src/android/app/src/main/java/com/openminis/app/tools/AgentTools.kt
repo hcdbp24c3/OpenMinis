@@ -67,6 +67,8 @@ object AgentTools {
         add(FileEditTool.definition())
         // [T-coding-m2-undo] Takes back the last file_write / file_edit change.
         add(FileUndoTool.definition())
+        // [T-coding-m2-todo] The task list shown above the composer.
+        add(TodoWriteTool.definition())
         if (supportsImageInput || visionGroupConfigured) {
             add(ReadImageTool.definition())
         }
