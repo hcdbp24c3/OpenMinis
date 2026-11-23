@@ -5392,6 +5392,8 @@ fun ChatScreen(
                 // [T-coding-m2-todo] The agent's task list, one row above the
                 // input card; draws nothing while this chat has no list.
                 SessionTodoCard(sessionId = { viewModel.currentSessionId })
+                // [T-coding-m3] Plan-mode chip and the turn's "Review changes".
+                SessionCodingBar(sessionId = { viewModel.currentSessionId })
 
                 // T13 banner moved INSIDE the LazyColumn so it renders at the
                 // visual end of the message list (mirrors iOS — see the

@@ -69,6 +69,8 @@ object AgentTools {
         add(FileUndoTool.definition())
         // [T-coding-m2-todo] The task list shown above the composer.
         add(TodoWriteTool.definition())
+        // [T-coding-m3-shadow] Diff of what this turn changed.
+        add(TurnChangesTool.definition())
         if (supportsImageInput || visionGroupConfigured) {
             add(ReadImageTool.definition())
         }

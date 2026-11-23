@@ -126,6 +126,14 @@ internal fun ChatViewModel.filteredSlashCommands(): List<SlashCommand> {
             "clear" -> cmd.copy(
                 subtitle = context.getString(R.string.slash_clear_subtitle),
             )
+            // [T-coding-m3-plan]
+            "plan" -> cmd.copy(
+                subtitle = if (com.openminis.app.agent.PlanMode.isOn(context, activeSessionId)) {
+                    "Plan mode is on (read-only) — tap to turn off"
+                } else {
+                    "Plan first: read-only until you turn it off"
+                },
+            )
             else -> cmd
         }
     }
