@@ -103,9 +103,11 @@ class SubAgentsCollection(
         val thinking = (obj["thinking"] as? ConfigValue.Str)?.value?.let(::parseThinking)
         // Checked before writing, so the caller is told the limit instead of
         // normalize() silently dropping the new row.
-        if (repo.subAgents.size >= SubAgentLimits.MAX_COUNT) {
+        // (fork) Same rule as SubAgentsScreen: only CUSTOM agents count against
+        // the allowance; built-ins never eat into it (SubAgentLimits.MAX_CUSTOM).
+        if (repo.subAgents.count { !it.isBuiltIn } >= SubAgentLimits.MAX_CUSTOM) {
             throw ConfigError.InvalidValue(
-                "You can define at most ${SubAgentLimits.MAX_COUNT} sub agents (including the built-in one). Remove one first.",
+                "You can define at most ${SubAgentLimits.MAX_CUSTOM} custom sub agents (built-in ones do not count). Remove one first.",
             )
         }
         val created = SubAgentDefinition(
@@ -457,7 +459,7 @@ class SubAgentsCollection(
                     ConfigValue.Obj(
                         linkedMapOf(
                             "count" to ConfigValue.Int(items.size),
-                            "max" to ConfigValue.Int(SubAgentLimits.MAX_COUNT),
+                            "max" to ConfigValue.Int(SubAgentLimits.MAX_CUSTOM),
                             "agents" to ConfigValue.Arr(items),
                         ),
                     )
