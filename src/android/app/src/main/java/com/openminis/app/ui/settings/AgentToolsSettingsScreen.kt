@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.openminis.app.R
+import com.openminis.app.agent.ShellApproval
 import com.openminis.app.tools.AgentToolSwitch
 
 /**
@@ -45,6 +46,14 @@ fun AgentToolsSettingsScreen(onBack: () -> Unit) {
     // [T-android-ask-user] ask_user_question — the run pauses for an answer.
     var askEnabled by remember {
         mutableStateOf(AgentToolSwitch.ASK.isEnabled(context))
+    }
+
+    // [T-coding-m2-approval] When the agent's shell stops and asks first.
+    var confirmRisky by remember {
+        mutableStateOf(ShellApproval.confirmRisky(context))
+    }
+    var confirmChanges by remember {
+        mutableStateOf(ShellApproval.confirmChanges(context))
     }
 
     SettingsScaffold(title = stringResource(R.string.settings_agent_tools), onBack = onBack) {
@@ -96,6 +105,35 @@ fun AgentToolsSettingsScreen(onBack: () -> Unit) {
                 onCheckedChange = {
                     askEnabled = it
                     AgentToolSwitch.ASK.setEnabled(context, it)
+                },
+                showDivider = false,
+            )
+        }
+        // [T-coding-m2-approval] Not a tool switch but the same kind of choice:
+        // how far the agent may go on its own. Strings are literals for now,
+        // like ConfigConfirmDialog's, until the wording settles.
+        SettingsSection(
+            header = "Shell approval",
+            footer = "Risky commands are recursive deletes of whole folders, forced pushes, " +
+                "git commands that discard work, and downloads piped into a shell. " +
+                "Commands you type in the terminal are never held back.",
+        ) {
+            SettingsSwitchRow(
+                title = "Ask before risky commands",
+                checked = confirmRisky,
+                onCheckedChange = {
+                    confirmRisky = it
+                    ShellApproval.setConfirmRisky(context, it)
+                },
+                showDivider = true,
+            )
+            SettingsSwitchRow(
+                title = "Ask before any command that changes things",
+                subtitle = "Read-only commands such as ls, rg and git status still run without asking.",
+                checked = confirmChanges,
+                onCheckedChange = {
+                    confirmChanges = it
+                    ShellApproval.setConfirmChanges(context, it)
                 },
                 showDivider = false,
             )

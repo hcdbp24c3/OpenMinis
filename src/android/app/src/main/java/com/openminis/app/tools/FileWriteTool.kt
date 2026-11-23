@@ -102,6 +102,10 @@ object FileWriteTool {
                 parent.mkdirs()
             }
 
+            // [T-coding-m2-undo] Keep what the file looked like before this
+            // write so file_undo can put it back. Never throws.
+            FileJournal.record(FileJournal.dir(context, sessionId), path, file)
+
             if (append) {
                 file.appendText(content)
             } else {

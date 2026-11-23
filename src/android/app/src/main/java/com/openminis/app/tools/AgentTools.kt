@@ -65,6 +65,8 @@ object AgentTools {
         add(FileReadTool.definition())
         add(FileWriteTool.definition())
         add(FileEditTool.definition())
+        // [T-coding-m2-undo] Takes back the last file_write / file_edit change.
+        add(FileUndoTool.definition())
         if (supportsImageInput || visionGroupConfigured) {
             add(ReadImageTool.definition())
         }
