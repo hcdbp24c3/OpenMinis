@@ -161,11 +161,18 @@ object SessionProject {
 
     fun set(context: Context, sessionId: String, dir: String) {
         prefs(context).edit().putString(sessionId, dir).apply()
+        _version.value = _version.value + 1
     }
 
     fun clear(context: Context, sessionId: String) {
         prefs(context).edit().remove(sessionId).apply()
+        _version.value = _version.value + 1
     }
+
+    private val _version = kotlinx.coroutines.flow.MutableStateFlow(0)
+
+    /** [T-coding-m4-git] Bumped whenever a project is set or cleared, so the UI can re-read [get]. */
+    val version: kotlinx.coroutines.flow.StateFlow<Int> get() = _version
 
     // ----------------------------------------------------------------- shell
 

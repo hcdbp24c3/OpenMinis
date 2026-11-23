@@ -71,6 +71,9 @@ object AgentTools {
         add(TodoWriteTool.definition())
         // [T-coding-m3-shadow] Diff of what this turn changed.
         add(TurnChangesTool.definition())
+        // [T-coding-m4-search] Bounded search without shell quoting.
+        add(SearchTools.grepDefinition())
+        add(SearchTools.globDefinition())
         if (supportsImageInput || visionGroupConfigured) {
             add(ReadImageTool.definition())
         }

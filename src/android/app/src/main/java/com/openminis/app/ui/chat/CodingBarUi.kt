@@ -68,9 +68,15 @@ internal fun SessionCodingBar(
     val planOn = remember(id, planVersion) { PlanMode.isOn(context, id) }
     val turn = turns[id]
     val hasSnapshot = turn != null && !turn.pending && turn.dir != null
-    if (!planOn && !hasSnapshot) return
+    // [T-coding-m4-git] The git sheet is offered once the conversation has a project.
+    val projectVersion by com.openminis.app.agent.SessionProject.version.collectAsState()
+    val projectDir = remember(id, projectVersion) {
+        if (id.isEmpty()) null else com.openminis.app.agent.SessionProject.get(context, id)
+    }
+    if (!planOn && !hasSnapshot && projectDir == null) return
 
     var showChanges by remember(id) { mutableStateOf(false) }
+    var showGit by remember(id) { mutableStateOf(false) }
 
     Row(
         modifier = modifier
@@ -93,6 +99,17 @@ internal fun SessionCodingBar(
                 onClick = { showChanges = true },
             )
         }
+        if (projectDir != null) {
+            CodingChip(
+                text = "Git",
+                accent = GitAccent,
+                onClick = { showGit = true },
+            )
+        }
+    }
+
+    if (showGit && projectDir != null) {
+        GitPanelDialog(sessionId = id, dir = projectDir, onDismiss = { showGit = false })
     }
 
     if (showChanges) {
