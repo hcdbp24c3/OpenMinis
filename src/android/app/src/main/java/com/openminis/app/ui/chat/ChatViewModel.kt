@@ -13167,6 +13167,9 @@ class ChatViewModel(
             // [T-coding-m3-shadow] What this turn changed, for self-review and reviewers.
             com.openminis.app.tools.TurnChangesTool.NAME ->
                 com.openminis.app.tools.TurnChangesTool.execute(argsJson, fsSessionId)
+            // [T-coding-m4-search] ripgrep behind two bounded, read-only tools.
+            com.openminis.app.tools.SearchTools.GREP, com.openminis.app.tools.SearchTools.GLOB ->
+                com.openminis.app.tools.SearchTools.execute(name, argsJson, activeSessionId, fsSessionId, context)
             FileReadTool.NAME -> {
                 val result = FileReadTool.execute(argsJson, fsSessionId, context)
                 // Record skill usage when SKILL.md under /var/minis/skills/<id>/ is read.
@@ -17792,6 +17795,8 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
         "file_undo" -> "Undo File Change"
         "todo_write" -> "Update Tasks"
         "turn_changes" -> "Review Changes"
+        "grep" -> "Search Files"
+        "glob" -> "Find Files"
         "browser_use" -> "Browse Web"
         "read_image" -> "Read Image"
         "memory_write" -> "Write Memory"
