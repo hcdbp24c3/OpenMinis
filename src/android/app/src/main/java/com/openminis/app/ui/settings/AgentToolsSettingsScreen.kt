@@ -55,6 +55,10 @@ fun AgentToolsSettingsScreen(onBack: () -> Unit) {
     var confirmChanges by remember {
         mutableStateOf(ShellApproval.confirmChanges(context))
     }
+    // [T-coding-m3-shadow] Snapshot the project before the agent changes it.
+    var shadowSnapshots by remember {
+        mutableStateOf(com.openminis.app.agent.ShadowGit.isEnabled(context))
+    }
 
     SettingsScaffold(title = stringResource(R.string.settings_agent_tools), onBack = onBack) {
         SettingsSection(footer = stringResource(R.string.agent_tools_browser_footer)) {
@@ -134,6 +138,16 @@ fun AgentToolsSettingsScreen(onBack: () -> Unit) {
                 onCheckedChange = {
                     confirmChanges = it
                     ShellApproval.setConfirmChanges(context, it)
+                },
+                showDivider = true,
+            )
+            SettingsSwitchRow(
+                title = "Snapshot the project before changes",
+                subtitle = "Lets you review and revert a whole turn. Uses a hidden git repository, never your own.",
+                checked = shadowSnapshots,
+                onCheckedChange = {
+                    shadowSnapshots = it
+                    com.openminis.app.agent.ShadowGit.setEnabled(context, it)
                 },
                 showDivider = false,
             )

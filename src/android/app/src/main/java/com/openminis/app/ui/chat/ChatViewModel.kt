@@ -1965,7 +1965,8 @@ class ChatViewModel(
     private var askUserDeferred: kotlinx.coroutines.CompletableDeferred<String>? = null
 
     private val agentTools: List<AgentToolDefinition>
-        get() = AgentTools.makeAgentTools(
+        // [T-coding-m3-plan] Plan mode takes the file-writing tools out of the schema.
+        get() = com.openminis.app.agent.PlanMode.filterTools(context, fsSessionId, AgentTools.makeAgentTools(
             // [T-android-vision-group / GH#182] The main model's own vision
             // capability. When false but a Vision Group is configured, read_image
             // is still exposed and routes through the group (see
@@ -1993,7 +1994,7 @@ class ChatViewModel(
             // request and the enum can never advertise a name the resolver
             // would reject.
             rosterNames = providerRepository.subAgents.map { it.name },
-        )
+        ))
 
     /**
      * [T-sub-agents-resume] Restart sub agent runs the app lost when it was
@@ -3213,6 +3214,13 @@ class ChatViewModel(
             title = "Thinking",
             subtitle = "",
         ),
+        // [T-coding-m3-plan] Toggle plan mode (read-only) for this conversation.
+        SlashCommand(
+            id = "plan",
+            icon = Icons.Outlined.Build,
+            title = "Plan",
+            subtitle = "",
+        ),
     )
 
     // [T-android-split-chat] filteredSlashCommands / updateSlashMenuState /
@@ -3295,6 +3303,7 @@ class ChatViewModel(
             "compact" -> compactAll()
             "memory" -> toggleMemoryEnabled()
             "thinking" -> toggleThinking()
+            "plan" -> com.openminis.app.agent.PlanMode.toggle(context, activeSessionId)
             "clear" -> _clearChatConfirmRequested.value = true
             else -> AppLogger.info(TAG, "[Slash] unrecognized id=${cmd.id} — no dispatch")
         }
@@ -9073,6 +9082,8 @@ class ChatViewModel(
         // [T-android-stop-sibling-subagent] New work in this session lifts the
         // stop: delegations from here on may drive the turn again.
         com.openminis.app.agent.jobs.AgentJobRegistry.clearDelegationMute(activeSessionId)
+        // [T-coding-m3-shadow] A new user turn: its first change gets a fresh snapshot.
+        com.openminis.app.agent.ShadowGit.onUserTurn(activeSessionId)
         sendMessage(text, skipContextCheck = false, headless = false)
     }
 
@@ -13143,7 +13154,19 @@ class ChatViewModel(
         // bridge, which is now where checkPermission runs.
         val toolTitle = try { JSONObject(argsJson).optString("tool_title", name) } catch (_: Exception) { name }
 
+        // [T-coding-m3-plan] While planning, nothing that changes files runs —
+        // for this conversation and for sub agents working on its behalf.
+        com.openminis.app.agent.PlanMode.refusal(context, fsSessionId, name, argsJson)?.let {
+            return ToolExecutionResult(it, false, toolTitle = toolTitle)
+        }
+        // [T-coding-m3-shadow] Snapshot the project before the turn's first
+        // change, so the turn can be reviewed and reverted as a whole.
+        com.openminis.app.agent.ShadowGit.beforeTool(context, activeSessionId, fsSessionId, name, argsJson)
+
         return when (name) {
+            // [T-coding-m3-shadow] What this turn changed, for self-review and reviewers.
+            com.openminis.app.tools.TurnChangesTool.NAME ->
+                com.openminis.app.tools.TurnChangesTool.execute(argsJson, fsSessionId)
             FileReadTool.NAME -> {
                 val result = FileReadTool.execute(argsJson, fsSessionId, context)
                 // Record skill usage when SKILL.md under /var/minis/skills/<id>/ is read.
@@ -15572,6 +15595,11 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
             com.openminis.app.agent.SessionProject.promptFragmentFor(context, fsSessionId)?.let {
                 append("\n").append(it)
             }
+            // [T-coding-m3-plan] Same place and same reason: present only while
+            // plan mode is on, so every other conversation's prompt is unchanged.
+            com.openminis.app.agent.PlanMode.promptFragmentFor(context, fsSessionId)?.let {
+                append("\n").append(it)
+            }
         }
     }
 
@@ -17763,6 +17791,7 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
         "file_edit" -> "Edit File"
         "file_undo" -> "Undo File Change"
         "todo_write" -> "Update Tasks"
+        "turn_changes" -> "Review Changes"
         "browser_use" -> "Browse Web"
         "read_image" -> "Read Image"
         "memory_write" -> "Write Memory"
