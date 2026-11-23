@@ -13165,6 +13165,12 @@ class ChatViewModel(
             FileEditTool.NAME -> FileEditTool.execute(argsJson, fsSessionId, context).also {
                 if (it.success) maybeReloadSkillsForPath(argsJson)
             }
+            // [T-coding-m2-undo] Restores the copy FileJournal kept before the
+            // last file_write / file_edit. Same session dir as those two tools.
+            com.openminis.app.tools.FileUndoTool.NAME ->
+                com.openminis.app.tools.FileUndoTool.execute(argsJson, fsSessionId, context).also {
+                    if (it.success) skillRepository?.requestReload("file_undo")
+                }
             // T178: pass sessionId + context so read_image routes through
             // resolveSessionHostPath like file_read/write/edit do — without
             // these, the tool consults the global last-writer-wins
@@ -14348,6 +14354,19 @@ class ChatViewModel(
                 persist = helperConfig == null,
             )
             projectDir.error?.let { return ToolExecutionResult(it, false, toolTitle = toolTitle) }
+
+            // [T-coding-m2-approval] Ask before a command that could cost the
+            // user work. Judged on the command as the model wrote it (before the
+            // `cd` line and any bash wrapping), and BEFORE anything runs. A sub
+            // agent cannot ask, so it is refused and told to hand the command
+            // back to its parent.
+            com.openminis.app.agent.ShellApproval.check(
+                context = context,
+                command = command,
+                dir = projectDir.dir ?: com.openminis.app.agent.SessionProject.DEFAULT_DIR,
+                isSubAgent = helperConfig != null,
+            )?.let { return ToolExecutionResult(it, false, toolTitle = toolTitle) }
+
             projectDir.dir?.let { command = com.openminis.app.agent.SessionProject.wrapCommand(it, command) }
 
             // [T-bash-on-demand] Detect busybox-ash-incompatible bash syntax and,
@@ -17732,6 +17751,7 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
         "file_read" -> "Read File"
         "file_write" -> "Write File"
         "file_edit" -> "Edit File"
+        "file_undo" -> "Undo File Change"
         "browser_use" -> "Browse Web"
         "read_image" -> "Read Image"
         "memory_write" -> "Write Memory"

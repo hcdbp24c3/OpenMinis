@@ -103,6 +103,10 @@ object FileEditTool {
                 content.replaceFirst(oldString, newString)
             }
 
+            // [T-coding-m2-undo] Keep what the file looked like before this
+            // write so file_undo can put it back. Never throws.
+            FileJournal.record(FileJournal.dir(context, sessionId), path, file)
+
             file.writeText(newContent)
             val replacements = if (replaceAll) count else 1
             ToolExecutionResult(
