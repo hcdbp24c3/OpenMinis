@@ -25,7 +25,29 @@ enum class BrowserAction(val value: String) {
     GET_COOKIES("get_cookies"),
     SET_COOKIES("set_cookies"),
     SCROLL_AND_COLLECT("scroll_and_collect"),
-    WAIT_FOR_DOM_STABLE("wait_for_dom_stable");
+    WAIT_FOR_DOM_STABLE("wait_for_dom_stable"),
+
+    // [M5-browser-devtools] Ref-based page model + devtools-style inspection.
+    // All of these operate on the current page (never open one), so they
+    // follow the selected tab like the other read actions.
+    /** Compact accessibility-style outline with short element refs (e1, e2 …). */
+    SNAPSHOT("snapshot"),
+    /** Wait for a selector/ref state, text, URL substring and/or network idle. */
+    WAIT("wait"),
+    /** Choose an option of a native <select>. */
+    SELECT_OPTION("select_option"),
+    /** Read / clear the tab's captured console messages and uncaught errors. */
+    CONSOLE("console"),
+    /** Read / clear the tab's request log; one request in detail by id. */
+    NETWORK("network"),
+    /** Evaluate JS and return its value, safely serialised. */
+    EVALUATE("evaluate"),
+    /** DOM + computed-style inspection of a selector or ref. */
+    INSPECT("inspect"),
+    /** Cookies, localStorage and sessionStorage of the current page. */
+    STORAGE("storage"),
+    /** Navigation timing, paints, LCP, resource totals, JS heap. */
+    PERFORMANCE("performance");
 
     /**
      * [T-browser-readaction-follow-tab-and-yolo-android] True when this action
