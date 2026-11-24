@@ -98,7 +98,7 @@ class ScheduledActiveSessionTest {
     @Test fun `the hold is fed, held through each fire, and released on delete`() {
         assertTrue(ProductionSources.read("MinisApp.kt").contains("ScheduledSessionHold.observe(this@MinisApp).collect { held ->"))
         val receiver = ProductionSources.read("scheduled/ScheduledTaskAlarmReceiver.kt")
-        assertTrue(receiver.indexOf("ScheduledSessionHold.beginRun(taskId)") in 0 until receiver.indexOf("manager.rescheduleNext(taskId)"))
+        assertTrue(receiver.indexOf("ScheduledSessionHold.beginRun(taskId)") in 0 until receiver.indexOf("manager.rescheduleNext(taskId, slot)"))
         assertTrue(receiver.contains("ScheduledSessionHold.endRun(taskId)"))
         val runner = ProductionSources.read("scheduled/ScheduledAgentRunner.kt")
         assertEquals(2, runner.split("ScheduledSessionHold.endRun(task.id)").size - 1)

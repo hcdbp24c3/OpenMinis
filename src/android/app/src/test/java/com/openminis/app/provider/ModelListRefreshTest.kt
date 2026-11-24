@@ -116,7 +116,8 @@ class ModelListRefreshTest {
     @Test
     fun `refresh returns an outcome and the Refresh row and the RPC show it`() {
         val repo = ProductionSources.read("data/repository/ProviderRepository.kt")
-        assertTrue(repo.contains("): ModelRefreshOutcome {"))
+        // (fork sync) upstream 1.15 moved the body into withContext(IO) [FIX-261025-18].
+        assertTrue(repo.contains("): ModelRefreshOutcome = "))
         assertTrue("the openAI branch uses the detailed fetch",
             repo.contains("OpenAIModelsApi.fetchModelsDetailed(apiKey, baseURL, customUserAgent = instance.customUserAgent,"))
         assertTrue(repo.contains("reportVendorError(\"the provider returned no models\")"))
