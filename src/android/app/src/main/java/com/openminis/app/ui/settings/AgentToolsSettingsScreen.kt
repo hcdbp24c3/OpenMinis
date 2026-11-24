@@ -43,10 +43,6 @@ fun AgentToolsSettingsScreen(onBack: () -> Unit) {
     var repoDigestEnabled by remember {
         mutableStateOf(AgentToolSwitch.REPO.isEnabled(context))
     }
-    // [T-android-ask-user] ask_user_question — the run pauses for an answer.
-    var askEnabled by remember {
-        mutableStateOf(AgentToolSwitch.ASK.isEnabled(context))
-    }
 
     // [T-coding-m2-approval] When the agent's shell stops and asks first.
     var confirmRisky by remember {
@@ -111,15 +107,8 @@ fun AgentToolsSettingsScreen(onBack: () -> Unit) {
                     repoDigestEnabled = it
                     AgentToolSwitch.REPO.setEnabled(context, it)
                 },
-                showDivider = true,
-            )
-            SettingsSwitchRow(
-                title = stringResource(R.string.agent_tools_ask),
-                checked = askEnabled,
-                onCheckedChange = {
-                    askEnabled = it
-                    AgentToolSwitch.ASK.setEnabled(context, it)
-                },
+                // [T-ask-merge] Last row now: the "Ask user" switch moved into
+                // the single User Interaction switch further down.
                 showDivider = false,
             )
         }

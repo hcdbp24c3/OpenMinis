@@ -32,7 +32,8 @@ class PlanModeTest {
         for (name in PlanMode.WRITE_TOOLS) assertNotNull(name, PlanMode.refusalFor(name, "{}"))
         assertNull(PlanMode.refusalFor("file_read", "{}"))
         assertNull(PlanMode.refusalFor("turn_changes", "{}"))
-        assertNull(PlanMode.refusalFor("ask_user_question", "{}"))
+        // [T-ask-merge] user_ask is the one ask tool; planning must not block it.
+        assertNull(PlanMode.refusalFor("user_ask", "{}"))
     }
 
     @Test
