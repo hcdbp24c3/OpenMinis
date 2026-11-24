@@ -14,10 +14,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -148,51 +147,57 @@ fun SettingsScreen(
             )
         },
     ) { padding ->
-        Column(
+        // [T-perf-open-settings] A lazy list: only the sections that fit on
+        // screen are composed in the first frame of the screen transition,
+        // instead of all nine with every row and icon. Same content, same order.
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState()),
+                .padding(padding),
         ) {
             // -- LLM Providers --
-            SettingsSection(
-                title = stringResource(R.string.settings_section_llm_providers),
-                footer = stringResource(R.string.settings_section_llm_providers_footer),
-            ) {
-                SettingsItem(
-                    icon = Icons.Outlined.Lock,
-                    iconColor = Color(0xFF007AFF),
-                    title = stringResource(R.string.settings_manage_providers),
-                    subtitle = stringResource(R.string.settings_manage_providers_subtitle),
-                    onClick = onProvidersClick,
-                )
-                SettingsItem(
-                    icon = Icons.Outlined.Settings,
-                    iconColor = Color(0xFF007AFF),
-                    title = stringResource(R.string.settings_model_groups),
-                    subtitle = stringResource(R.string.settings_model_groups_subtitle),
-                    onClick = onModelGroupsClick,
-                )
-                SettingsItem(
-                    icon = Icons.Outlined.BarChart,
-                    iconColor = Color(0xFF007AFF),
-                    title = stringResource(R.string.settings_token_usage),
-                    subtitle = stringResource(R.string.settings_token_usage_subtitle),
-                    onClick = onUsageClick,
-                    showDivider = false,
-                )
+            item {
+                SettingsSection(
+                    title = stringResource(R.string.settings_section_llm_providers),
+                    footer = stringResource(R.string.settings_section_llm_providers_footer),
+                ) {
+                    SettingsItem(
+                        icon = Icons.Outlined.Lock,
+                        iconColor = Color(0xFF007AFF),
+                        title = stringResource(R.string.settings_manage_providers),
+                        subtitle = stringResource(R.string.settings_manage_providers_subtitle),
+                        onClick = onProvidersClick,
+                    )
+                    SettingsItem(
+                        icon = Icons.Outlined.Settings,
+                        iconColor = Color(0xFF007AFF),
+                        title = stringResource(R.string.settings_model_groups),
+                        subtitle = stringResource(R.string.settings_model_groups_subtitle),
+                        onClick = onModelGroupsClick,
+                    )
+                    SettingsItem(
+                        icon = Icons.Outlined.BarChart,
+                        iconColor = Color(0xFF007AFF),
+                        title = stringResource(R.string.settings_token_usage),
+                        subtitle = stringResource(R.string.settings_token_usage_subtitle),
+                        onClick = onUsageClick,
+                        showDivider = false,
+                    )
+                }
             }
 
             // -- Appearance --
-            SettingsSection(title = stringResource(R.string.settings_section_appearance)) {
-                SettingsItem(
-                    icon = Icons.Outlined.Palette,
-                    iconColor = Color(0xFF5856D6),
-                    title = stringResource(R.string.settings_section_appearance),
-                    subtitle = stringResource(R.string.settings_appearance_subtitle),
-                    onClick = onAppearanceClick,
-                    showDivider = false,
-                )
+            item {
+                SettingsSection(title = stringResource(R.string.settings_section_appearance)) {
+                    SettingsItem(
+                        icon = Icons.Outlined.Palette,
+                        iconColor = Color(0xFF5856D6),
+                        title = stringResource(R.string.settings_section_appearance),
+                        subtitle = stringResource(R.string.settings_appearance_subtitle),
+                        onClick = onAppearanceClick,
+                        showDivider = false,
+                    )
+                }
             }
 
             // -- Agent Runtime --
@@ -206,225 +211,241 @@ fun SettingsScreen(
             // connects to (MCP, env). Android had grown its own order simply by
             // appending each row as it landed, which put the two capability
             // switches in the middle of the identity rows.
-            SettingsSection(title = stringResource(R.string.settings_section_agent_runtime)) {
-                // [T-tools-granular-switches] Which optional tools the agent may use.
-                SettingsItem(
-                    icon = Icons.Outlined.Handyman,
-                    iconColor = Color(0xFF5E5CE6),
-                    title = stringResource(R.string.settings_agent_tools),
-                    subtitle = stringResource(R.string.settings_agent_tools_subtitle),
-                    onClick = onAgentToolsClick,
-                )
-                // [T-android-web-search] Right below Agent Tools: both are about
-                // what the agent may call, and this one configures the tool's
-                // backend rather than switching it on.
-                SettingsItem(
-                    icon = Icons.Outlined.Public,
-                    iconColor = Color(0xFF32ADE6),
-                    title = stringResource(R.string.settings_web_search),
-                    subtitle = stringResource(R.string.settings_web_search_subtitle),
-                    onClick = onWebSearchClick,
-                )
-                // [T-android-repo-digest] Next to Web search: both configure a
-                // network tool's backend rather than switching it on.
-                // [T-git-vault] Directly below Repository digest: the vault holds the
-                // credentials that tool (and `git` in the terminal) authenticate with,
-                // so this is where a user looks when a private repo 404s.
-                SettingsItem(
-                    icon = Icons.Outlined.Key,
-                    iconColor = Color(0xFFFF9500),
-                    title = stringResource(R.string.settings_git_vault),
-                    subtitle = stringResource(R.string.settings_git_vault_subtitle),
-                    onClick = onGitVaultClick,
-                )
-                SettingsItem(
-                    icon = Icons.Outlined.Groups,
-                    iconColor = com.openminis.app.ui.chat.HelperAccentStatic,
-                    title = stringResource(R.string.settings_agents),
-                    subtitle = stringResource(R.string.settings_agents_subtitle),
-                    onClick = onAgentsClick,
-                )
-                SettingsItem(
-                    icon = Icons.Outlined.Extension,
-                    iconColor = Color(0xFF007AFF),
-                    title = stringResource(R.string.settings_skills),
-                    subtitle = stringResource(R.string.settings_skills_subtitle),
-                    onClick = onSkillsClick,
-                )
-                // [T-soul-md] Between Skills and Memory, as on iOS.
-                SettingsItem(
-                    icon = Icons.Outlined.AutoAwesome,
-                    iconColor = Color(0xFFFF9500),
-                    title = stringResource(R.string.settings_soul),
-                    subtitle = stringResource(R.string.settings_soul_subtitle),
-                    onClick = onSoulClick,
-                )
-                SettingsItem(
-                    icon = Icons.Outlined.Psychology,
-                    iconColor = Color(0xFF5856D6),
-                    title = stringResource(R.string.settings_memory),
-                    subtitle = stringResource(R.string.settings_memory_subtitle),
-                    onClick = onMemoryClick,
-                )
-                // [T-mcp-integration-android] MCP Integrations — below Memory.
-                // [T-android-mcp-icon-distinct] Dashboard (2x2 block grid) instead of
-                // Extension so MCP no longer shares the Skills row's puzzle-piece icon —
-                // the grid reads as "multiple composed blocks/servers". teal unchanged.
-                SettingsItem(
-                    icon = Icons.Outlined.Dashboard,
-                    iconColor = Color(0xFF30B0C7),
-                    title = stringResource(R.string.settings_mcp),
-                    subtitle = stringResource(R.string.settings_mcp_subtitle),
-                    onClick = onMcpClick,
-                )
-                SettingsItem(
-                    icon = Icons.Outlined.Terminal,
-                    iconColor = Color(0xFF34C759),
-                    title = stringResource(R.string.settings_env_vars),
-                    subtitle = stringResource(R.string.settings_env_vars_subtitle),
-                    onClick = onEnvVarsClick,
-                    showDivider = false,
-                )
+            item {
+                SettingsSection(title = stringResource(R.string.settings_section_agent_runtime)) {
+                    // [T-tools-granular-switches] Which optional tools the agent may use.
+                    SettingsItem(
+                        icon = Icons.Outlined.Handyman,
+                        iconColor = Color(0xFF5E5CE6),
+                        title = stringResource(R.string.settings_agent_tools),
+                        subtitle = stringResource(R.string.settings_agent_tools_subtitle),
+                        onClick = onAgentToolsClick,
+                    )
+                    // [T-android-web-search] Right below Agent Tools: both are about
+                    // what the agent may call, and this one configures the tool's
+                    // backend rather than switching it on.
+                    SettingsItem(
+                        icon = Icons.Outlined.Public,
+                        iconColor = Color(0xFF32ADE6),
+                        title = stringResource(R.string.settings_web_search),
+                        subtitle = stringResource(R.string.settings_web_search_subtitle),
+                        onClick = onWebSearchClick,
+                    )
+                    // [T-android-repo-digest] Next to Web search: both configure a
+                    // network tool's backend rather than switching it on.
+                    // [T-git-vault] Directly below Repository digest: the vault holds the
+                    // credentials that tool (and `git` in the terminal) authenticate with,
+                    // so this is where a user looks when a private repo 404s.
+                    SettingsItem(
+                        icon = Icons.Outlined.Key,
+                        iconColor = Color(0xFFFF9500),
+                        title = stringResource(R.string.settings_git_vault),
+                        subtitle = stringResource(R.string.settings_git_vault_subtitle),
+                        onClick = onGitVaultClick,
+                    )
+                    SettingsItem(
+                        icon = Icons.Outlined.Groups,
+                        iconColor = com.openminis.app.ui.chat.HelperAccentStatic,
+                        title = stringResource(R.string.settings_agents),
+                        subtitle = stringResource(R.string.settings_agents_subtitle),
+                        onClick = onAgentsClick,
+                    )
+                    SettingsItem(
+                        icon = Icons.Outlined.Extension,
+                        iconColor = Color(0xFF007AFF),
+                        title = stringResource(R.string.settings_skills),
+                        subtitle = stringResource(R.string.settings_skills_subtitle),
+                        onClick = onSkillsClick,
+                    )
+                    // [T-soul-md] Between Skills and Memory, as on iOS.
+                    SettingsItem(
+                        icon = Icons.Outlined.AutoAwesome,
+                        iconColor = Color(0xFFFF9500),
+                        title = stringResource(R.string.settings_soul),
+                        subtitle = stringResource(R.string.settings_soul_subtitle),
+                        onClick = onSoulClick,
+                    )
+                    SettingsItem(
+                        icon = Icons.Outlined.Psychology,
+                        iconColor = Color(0xFF5856D6),
+                        title = stringResource(R.string.settings_memory),
+                        subtitle = stringResource(R.string.settings_memory_subtitle),
+                        onClick = onMemoryClick,
+                    )
+                    // [T-mcp-integration-android] MCP Integrations — below Memory.
+                    // [T-android-mcp-icon-distinct] Dashboard (2x2 block grid) instead of
+                    // Extension so MCP no longer shares the Skills row's puzzle-piece icon —
+                    // the grid reads as "multiple composed blocks/servers". teal unchanged.
+                    SettingsItem(
+                        icon = Icons.Outlined.Dashboard,
+                        iconColor = Color(0xFF30B0C7),
+                        title = stringResource(R.string.settings_mcp),
+                        subtitle = stringResource(R.string.settings_mcp_subtitle),
+                        onClick = onMcpClick,
+                    )
+                    SettingsItem(
+                        icon = Icons.Outlined.Terminal,
+                        iconColor = Color(0xFF34C759),
+                        title = stringResource(R.string.settings_env_vars),
+                        subtitle = stringResource(R.string.settings_env_vars_subtitle),
+                        onClick = onEnvVarsClick,
+                        showDivider = false,
+                    )
+                }
             }
 
             // -- Storage --
-            SettingsSection(title = stringResource(R.string.settings_section_storage)) {
-                SettingsItem(
-                    icon = Icons.Outlined.Inventory2,
-                    iconColor = Color(0xFF007AFF),
-                    title = stringResource(R.string.settings_section_storage),
-                    subtitle = stringResource(R.string.settings_storage_subtitle),
-                    onClick = onRootfsClick,
-                )
-                SettingsItem(
-                    icon = Icons.Outlined.Folder,
-                    iconColor = Color(0xFF34C759),
-                    title = stringResource(R.string.settings_shared_folders),
-                    subtitle = stringResource(R.string.settings_shared_folders_subtitle),
-                    onClick = onSharedFoldersClick,
-                )
-                SettingsItem(
-                    icon = Icons.Outlined.FolderShared,
-                    iconColor = Color(0xFFFF9500),
-                    title = stringResource(R.string.settings_mount_external_folders),
-                    subtitle = stringResource(R.string.settings_mount_external_folders_subtitle),
-                    onClick = onMountedFoldersClick,
-                )
-                SettingsItem(
-                    icon = Icons.Outlined.Backup,
-                    iconColor = Color(0xFF34C759),
-                    title = stringResource(R.string.settings_backup_restore),
-                    subtitle = stringResource(R.string.settings_backup_restore_subtitle),
-                    onClick = onBackupClick,
-                    showDivider = false,
-                )
+            item {
+                SettingsSection(title = stringResource(R.string.settings_section_storage)) {
+                    SettingsItem(
+                        icon = Icons.Outlined.Inventory2,
+                        iconColor = Color(0xFF007AFF),
+                        title = stringResource(R.string.settings_section_storage),
+                        subtitle = stringResource(R.string.settings_storage_subtitle),
+                        onClick = onRootfsClick,
+                    )
+                    SettingsItem(
+                        icon = Icons.Outlined.Folder,
+                        iconColor = Color(0xFF34C759),
+                        title = stringResource(R.string.settings_shared_folders),
+                        subtitle = stringResource(R.string.settings_shared_folders_subtitle),
+                        onClick = onSharedFoldersClick,
+                    )
+                    SettingsItem(
+                        icon = Icons.Outlined.FolderShared,
+                        iconColor = Color(0xFFFF9500),
+                        title = stringResource(R.string.settings_mount_external_folders),
+                        subtitle = stringResource(R.string.settings_mount_external_folders_subtitle),
+                        onClick = onMountedFoldersClick,
+                    )
+                    SettingsItem(
+                        icon = Icons.Outlined.Backup,
+                        iconColor = Color(0xFF34C759),
+                        title = stringResource(R.string.settings_backup_restore),
+                        subtitle = stringResource(R.string.settings_backup_restore_subtitle),
+                        onClick = onBackupClick,
+                        showDivider = false,
+                    )
+                }
             }
 
             // -- Network -- [FEAT-261021-04, iOS c77be4fb6] its own section below
             // Storage: Network Routing, Tailscale, Proxies and the Shell
             // Container DNS (until now only on the Rootfs page).
-            SettingsSection(title = stringResource(R.string.network_title)) {
-                SettingsItem(
-                    icon = Icons.Outlined.Lan,
-                    iconColor = Color(0xFF007AFF),
-                    title = stringResource(R.string.network_routing_title),
-                    subtitle = null,
-                    onClick = onNetworkClick,
-                )
-                SettingsItem(
-                    icon = Icons.Outlined.VpnLock,
-                    iconColor = Color(0xFF5856D6),
-                    title = stringResource(R.string.network_tailscale),
-                    subtitle = null,
-                    onClick = onTailscaleClick,
-                )
-                SettingsItem(
-                    icon = Icons.Outlined.Router,
-                    iconColor = Color(0xFFFF9500),
-                    title = stringResource(R.string.network_proxies),
-                    subtitle = null,
-                    onClick = onProxiesClick,
-                )
-                SettingsItem(
-                    icon = Icons.Outlined.Dns,
-                    iconColor = Color(0xFF8E8E93),
-                    title = stringResource(R.string.network_container_dns),
-                    subtitle = null,
-                    onClick = onContainerDnsClick,
-                    showDivider = false,
-                )
+            item {
+                SettingsSection(title = stringResource(R.string.network_title)) {
+                    SettingsItem(
+                        icon = Icons.Outlined.Lan,
+                        iconColor = Color(0xFF007AFF),
+                        title = stringResource(R.string.network_routing_title),
+                        subtitle = null,
+                        onClick = onNetworkClick,
+                    )
+                    SettingsItem(
+                        icon = Icons.Outlined.VpnLock,
+                        iconColor = Color(0xFF5856D6),
+                        title = stringResource(R.string.network_tailscale),
+                        subtitle = null,
+                        onClick = onTailscaleClick,
+                    )
+                    SettingsItem(
+                        icon = Icons.Outlined.Router,
+                        iconColor = Color(0xFFFF9500),
+                        title = stringResource(R.string.network_proxies),
+                        subtitle = null,
+                        onClick = onProxiesClick,
+                    )
+                    SettingsItem(
+                        icon = Icons.Outlined.Dns,
+                        iconColor = Color(0xFF8E8E93),
+                        title = stringResource(R.string.network_container_dns),
+                        subtitle = null,
+                        onClick = onContainerDnsClick,
+                        showDivider = false,
+                    )
+                }
             }
 
             // -- Permissions --
-            SettingsSection(title = stringResource(R.string.settings_section_permissions)) {
-                SettingsItem(
-                    icon = Icons.Outlined.Shield,
-                    iconColor = Color(0xFF007AFF),
-                    title = stringResource(R.string.settings_section_permissions),
-                    subtitle = stringResource(R.string.settings_permissions_subtitle),
-                    onClick = onPermissionsClick,
-                    showDivider = false,
-                )
+            item {
+                SettingsSection(title = stringResource(R.string.settings_section_permissions)) {
+                    SettingsItem(
+                        icon = Icons.Outlined.Shield,
+                        iconColor = Color(0xFF007AFF),
+                        title = stringResource(R.string.settings_section_permissions),
+                        subtitle = stringResource(R.string.settings_permissions_subtitle),
+                        onClick = onPermissionsClick,
+                        showDivider = false,
+                    )
+                }
             }
 
             // -- Background & Notifications (T50) --
-            SettingsSection(
-                title = stringResource(R.string.bg_section_header),
-                footer = stringResource(R.string.bg_section_footer),
-            ) {
-                SettingsItem(
-                    icon = Icons.Outlined.BatteryFull,
-                    iconColor = Color(0xFFFF9500),
+            item {
+                SettingsSection(
                     title = stringResource(R.string.bg_section_header),
-                    subtitle = stringResource(R.string.bg_section_subtitle),
-                    onClick = onBackgroundClick,
-                    showDivider = false,
-                )
+                    footer = stringResource(R.string.bg_section_footer),
+                ) {
+                    SettingsItem(
+                        icon = Icons.Outlined.BatteryFull,
+                        iconColor = Color(0xFFFF9500),
+                        title = stringResource(R.string.bg_section_header),
+                        subtitle = stringResource(R.string.bg_section_subtitle),
+                        onClick = onBackgroundClick,
+                        showDivider = false,
+                    )
+                }
             }
 
             // -- Logs --
-            SettingsSection(title = stringResource(R.string.settings_section_logs)) {
-                SettingsItem(
-                    icon = Icons.Outlined.Description,
-                    iconColor = Color(0xFF007AFF),
-                    title = stringResource(R.string.settings_section_logs),
-                    subtitle = stringResource(R.string.settings_logs_subtitle),
-                    onClick = onLogsClick,
-                    showDivider = false,
-                )
+            item {
+                SettingsSection(title = stringResource(R.string.settings_section_logs)) {
+                    SettingsItem(
+                        icon = Icons.Outlined.Description,
+                        iconColor = Color(0xFF007AFF),
+                        title = stringResource(R.string.settings_section_logs),
+                        subtitle = stringResource(R.string.settings_logs_subtitle),
+                        onClick = onLogsClick,
+                        showDivider = false,
+                    )
+                }
             }
 
             // -- About --
-            SettingsSection(title = stringResource(R.string.settings_section_about)) {
-                // [T-update-channels] The update badge's Settings layer.
-                val updateBadge by com.openminis.app.data.UpdateStateStore.hasUpdateBadge.collectAsState()
-                SettingsItem(
-                    icon = Icons.Outlined.Info,
-                    iconColor = Color(0xFF007AFF),
-                    title = stringResource(R.string.settings_about_minis),
-                    subtitle = stringResource(R.string.settings_about_subtitle),
-                    onClick = onAboutClick,
-                    badge = updateBadge,
-                )
-                SettingsItem(
-                    icon = Icons.Outlined.FrontHand,
-                    iconColor = Color(0xFF007AFF),
-                    title = stringResource(R.string.settings_privacy_policy),
-                    subtitle = null,
-                    // iOS canonical URL — ContentView.swift / AddProviderView.swift
-                    onClick = { openExternalUrl(context, "https://openminis.github.io/privacy-policy.html") },
-                )
-                SettingsItem(
-                    icon = Icons.Outlined.Feedback,
-                    iconColor = Color(0xFF007AFF),
-                    title = stringResource(R.string.settings_feedback),
-                    subtitle = null,
-                    onClick = { showFeedbackSheet = true },
-                    showDivider = false,
-                )
+            item {
+                SettingsSection(title = stringResource(R.string.settings_section_about)) {
+                    // [T-update-channels] The update badge's Settings layer.
+                    val updateBadge by com.openminis.app.data.UpdateStateStore.hasUpdateBadge.collectAsState()
+                    SettingsItem(
+                        icon = Icons.Outlined.Info,
+                        iconColor = Color(0xFF007AFF),
+                        title = stringResource(R.string.settings_about_minis),
+                        subtitle = stringResource(R.string.settings_about_subtitle),
+                        onClick = onAboutClick,
+                        badge = updateBadge,
+                    )
+                    SettingsItem(
+                        icon = Icons.Outlined.FrontHand,
+                        iconColor = Color(0xFF007AFF),
+                        title = stringResource(R.string.settings_privacy_policy),
+                        subtitle = null,
+                        // iOS canonical URL — ContentView.swift / AddProviderView.swift
+                        onClick = { openExternalUrl(context, "https://openminis.github.io/privacy-policy.html") },
+                    )
+                    SettingsItem(
+                        icon = Icons.Outlined.Feedback,
+                        iconColor = Color(0xFF007AFF),
+                        title = stringResource(R.string.settings_feedback),
+                        subtitle = null,
+                        onClick = { showFeedbackSheet = true },
+                        showDivider = false,
+                    )
+                }
             }
 
-            Spacer(Modifier.height(24.dp))
+            item {
+                Spacer(Modifier.height(24.dp))
+            }
         }
     }
 
