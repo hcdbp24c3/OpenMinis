@@ -35,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
@@ -408,6 +409,20 @@ fun BrowserSheet(
                     contentDesc = stringResource(R.string.browser_nav_forward),
                     enabled = canGoForward && !isAgentBusy,
                     onClick = { selectedTab?.manager?.goForward() },
+                )
+                // [T-browser-quick-copy] One tap copies the page link.
+                ToolbarIcon(
+                    icon = Icons.Default.ContentCopy,
+                    contentDesc = "Copy link",
+                    enabled = BrowserQuickCopy.canCopy(currentURL),
+                    onClick = {
+                        BrowserQuickCopy.copy(
+                            context,
+                            BrowserQuickCopy.Kind.LINK,
+                            url = currentURL,
+                            title = pageTitle,
+                        )
+                    },
                 )
                 // [T-android-browser-download-ux] Downloads entry: shows while
                 // the session has ANY download records, disappears when the
