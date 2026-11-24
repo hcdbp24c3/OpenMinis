@@ -6628,6 +6628,13 @@ class ChatViewModel(
                     "toLLMMessage.end",
                     "count=${llm.size} totalPartsChars=$totalPartsChars",
                 )
+                // [T-perf-open-chat] Warm ContextSizeMeter's per-message estimate
+                // cache while still off Main. The context measurement that runs
+                // on Main right after this block walks every character of the
+                // history; with the cache warm it is mostly lookups, so that
+                // walk no longer lands in the frames of the open transition.
+                // Look-ahead only: same messages, same numbers, result unused.
+                runCatching { ContextSizeMeter.estimateTokens(llm, reasoningEchoed()) }
                 LoadedSessionData(
                     messages = rows,
                     ordered = chatUi,

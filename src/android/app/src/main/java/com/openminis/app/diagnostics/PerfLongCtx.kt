@@ -127,6 +127,38 @@ object PerfLongCtx {
         } else {
             -1L
         }
+        // [T-perf-open-chat] Most steps of a chat open are reported from the
+        // main thread (composition, layout, placement). The memory snapshot
+        // reads /proc/self/status and asks the allocator for its size, and the
+        // line is then written out — about a dozen times inside the frames of
+        // the open transition. The timings above are taken here, on the
+        // caller; only the snapshot and the write move to one background
+        // thread, which also keeps these lines in order. Calls that are
+        // already off the main thread are unchanged.
+        val onMain = try {
+            val main = android.os.Looper.getMainLooper()
+            main != null && android.os.Looper.myLooper() === main
+        } catch (_: Throwable) {
+            false
+        }
+        if (onMain) {
+            try {
+                reporter.execute { report(sessionId, name, elapsedMs, sinceClickMs, extra) }
+                return
+            } catch (_: Throwable) {
+                // Fall through and report inline.
+            }
+        }
+        report(sessionId, name, elapsedMs, sinceClickMs, extra)
+    }
+
+    private val reporter: java.util.concurrent.ExecutorService by lazy {
+        java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+            Thread(r, "PerfLongCtx").apply { isDaemon = true }
+        }
+    }
+
+    private fun report(sessionId: String, name: String, elapsedMs: Long, sinceClickMs: Long, extra: String) {
         // [T-android-mem-probe-trust] Was `javaHeapMB=… nativeHeapMB=…`, where
         // the native figure came straight from Debug.getNativeHeapAllocatedSize().
         // On the 2026-08-15 field device (vivo) that call reported 9744 MB on a
