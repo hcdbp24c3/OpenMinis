@@ -726,6 +726,10 @@ fun ProviderDetailScreen(
     }
 
     if (showManageModelsSheet) {
+        // [T-manage-sheet-system-back] If the back press reaches the screen
+        // instead of the sheet's own window, it still closes the sheet first
+        // (same order as the in-app controls: detail -> list -> provider).
+        androidx.activity.compose.BackHandler { showManageModelsSheet = false }
         ManageProviderModelsSheet(
             instanceId = instanceId,
             providerRepository = providerRepository,

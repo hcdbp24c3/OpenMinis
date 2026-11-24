@@ -29,6 +29,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.activity.compose.BackHandler
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.text.BasicTextField
@@ -145,6 +146,12 @@ fun ManageProviderModelsSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
     ) {
+        // [T-manage-sheet-system-back] System back must do exactly what the
+        // sheet's own Close does: call onDismiss now. Left to the sheet's
+        // predictive-back animation, a sheet that was re-shown after returning
+        // from the model-edit screen could animate away and come straight back,
+        // because the host's saved "shown" flag was never cleared.
+        BackHandler(enabled = menuEntryId == null && entryToDelete == null) { onDismiss() }
         // [T-fix-sheet-bottom-clip] The height constraint must live on a wrapping
         // Column INSIDE the sheet content, NOT on the ModalBottomSheet modifier.
         Column(
