@@ -17,7 +17,17 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object OpenRouterModelsApi {
-    private val client = OkHttpClient()
+    // [T-android-model-list-timeouts] Explicit timeouts for the model list.
+    // The OkHttp default is a 10 s read timeout, and a gateway that builds its
+    // list on demand (Open WebUI style, measured 12.3 s uncached) blew through
+    // it: the refresh failed and the old list stayed. NetworkHttp.client
+    // derives the routed client from this one (newBuilder), so the timeouts
+    // carry over to every route.
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .callTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
     // [T-openrouter-voice-catalog] "-v2": entries saved before the speech /
     // transcription catalogs were merged in hold no voice models and no
     // voiceRole, and would otherwise be served for up to 7 more days — the
@@ -41,6 +51,9 @@ object OpenRouterModelsApi {
         apiKey: String,
         context: Context? = null,
         forceRefresh: Boolean = false,
+        // [FEAT-261021-16] The instance's Settings > Network tag (prov:<id>);
+        // null follows the default route.
+        netTag: String? = null,
     ): List<LLMModel> = withContext(Dispatchers.IO) {
         val cacheKey = apiKey
         if (context != null && !forceRefresh) {
@@ -52,9 +65,9 @@ object OpenRouterModelsApi {
         // by their output_modalities filters. Fetch all three at once and tag
         // each model with the list it came from.
         val (defaultResult, speech, transcription) = coroutineScope {
-            val d = async { fetchList(MODELS_URL, apiKey) }
-            val tts = async { fetchList("$MODELS_URL?output_modalities=speech", apiKey) }
-            val stt = async { fetchList("$MODELS_URL?output_modalities=transcription", apiKey) }
+            val d = async { fetchList(MODELS_URL, apiKey, netTag) }
+            val tts = async { fetchList("$MODELS_URL?output_modalities=speech", apiKey, netTag) }
+            val stt = async { fetchList("$MODELS_URL?output_modalities=transcription", apiKey, netTag) }
             Triple(d.await(), tts.await(), stt.await())
         }
 
@@ -97,7 +110,7 @@ object OpenRouterModelsApi {
         }
     }
 
-    private fun fetchList(url: String, apiKey: String): ListResult = try {
+    private fun fetchList(url: String, apiKey: String, netTag: String?): ListResult = try {
         val request = Request.Builder()
             .url(url)
             .header("Authorization", "Bearer $apiKey")
@@ -106,7 +119,7 @@ object OpenRouterModelsApi {
             // [T-android-default-ua] brand outbound /api/v1/models request.
             .applyUserAgentOverride(null)
             .build()
-        client.newCall(request).execute().use { response ->
+        com.openminis.app.network.NetworkHttp.client(netTag, client).newCall(request).execute().use { response ->
             val body = response.body?.string()
             if (!response.isSuccessful || body == null) {
                 ListResult.Failed(response.code)

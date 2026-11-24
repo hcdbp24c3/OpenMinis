@@ -3,6 +3,8 @@ package com.openminis.app.ui.settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -24,6 +26,8 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -37,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -142,6 +147,13 @@ fun ProviderDetailScreen(
     var customUserAgent by remember { mutableStateOf(instance.customUserAgent ?: "") }
 
     val entries = providerRepository.entriesFor(instanceId)
+    // [T-android-hidden-models-group] (#462 / #442) Hidden models used to sit
+    // in the main list, dimmed, so a provider with many hidden ones buried the
+    // models in use. They now live in a collapsible group at the bottom, the
+    // same split as iOS ProviderInstanceDetailView.
+    // (fork) The list itself lives in ManageProviderModelsSheet, which dims
+    // hidden rows and toggles them with the eye button, so the collapsible
+    // group is not rendered here.
     var isRefreshing by remember { mutableStateOf(false) }
     // [T-codex-dynamic-discovery GH#319] Set when the Codex discovery endpoint
     // rejects the stored credential. Shown as a dialog rather than silently
@@ -151,6 +163,9 @@ fun ProviderDetailScreen(
     // [T-fix-manage-sheet-reopen] rememberSaveable pins the sheet visibility
     // to the NavBackStackEntry so returning from ModelEntryDetail reopens it.
     var showManageModelsSheet by rememberSaveable { mutableStateOf(false) }
+    // [T-android-model-refresh-visible] What the last manual refresh did, shown
+    // under the Refresh row - a failed refresh used to look like "nothing happened".
+    var refreshOutcome by remember { mutableStateOf<com.openminis.app.data.repository.ProviderRepository.ModelRefreshOutcome?>(null) }
 
     val exportContext = androidx.compose.ui.platform.LocalContext.current
 
@@ -370,6 +385,11 @@ fun ProviderDetailScreen(
             }
         }
 
+        // ─── Network route [FEAT-261021-09] Settings > Network ─────────
+        // iOS ProviderNetworkRouteSection: the same setting as this
+        // provider's row on Settings > Network > Network Routing.
+        ProviderNetworkRouteSection(instance.id)
+
         // ─── API Format (OpenAI API-key only) ───────────────────────
         if (instance.providerType == ProviderType.openAI &&
             instance.credentialType != com.openminis.app.data.model.ProviderCredential.oauth
@@ -405,6 +425,16 @@ fun ProviderDetailScreen(
                     }
                 }
             }
+        }
+
+        // ─── Response idle timeout ──────────────────────────────────
+        // [T-sse-idle-timeout] OpenAI-compatible API-key instances only (the
+        // Codex sign-in path keeps its own budgets). Per device, not synced:
+        // see ResponseIdleTimeoutSetting. Mirrors iOS b15ac8aa3.
+        if (instance.providerType == ProviderType.openAI &&
+            instance.credentialType != com.openminis.app.data.model.ProviderCredential.oauth
+        ) {
+            ResponseIdleTimeoutSection(instance.id)
         }
 
         // ─── Azure OpenAI ───────────────────────────────────────────
@@ -518,6 +548,12 @@ fun ProviderDetailScreen(
             )
         }
 
+        // ─── Quota [T-provider-quota] ───────────────────────────────
+        // The account's upstream balance / quota, right after Status (iOS:
+        // between Status and Thinking Rules). Hidden for a disabled instance or
+        // one without a credential.
+        com.openminis.app.ui.quota.ProviderQuotaSection(instance = instance)
+
         // ─── Voice Service (dual visibility) ────────────────────────
         // [T-android-provider-voice] When this instance owns audio-modality
         // models, link to its shadow Voice Service detail — the only path back
@@ -554,6 +590,25 @@ fun ProviderDetailScreen(
         SettingsSection {
             SettingsRow(
                 title = stringResource(R.string.provider_detail_models_count_header, entries.size),
+                // [T-android-model-refresh-visible] What the last manual refresh
+                // did (upstream shows it under its Refresh row; the fork's
+                // refresh lives in this row's trailing button, so it goes here).
+                subtitle = when {
+                    isRefreshing -> stringResource(R.string.provider_refreshing_models)
+                    else -> refreshOutcome?.let { o ->
+                        val error = o.vendorError
+                        when {
+                            error == null -> stringResource(R.string.provider_refresh_result_ok, o.total, o.added)
+                            // [FIX-261025-18] Nothing from the provider, but the
+                            // built-in models it lacked were added.
+                            o.source == com.openminis.app.data.repository.ProviderRepository.ModelRefreshSource.KEPT && o.added > 0 ->
+                                stringResource(R.string.provider_refresh_result_builtin, error, o.added)
+                            o.source == com.openminis.app.data.repository.ProviderRepository.ModelRefreshSource.KEPT ->
+                                stringResource(R.string.provider_refresh_result_kept, error)
+                            else -> stringResource(R.string.provider_refresh_result_fallback, error, o.total)
+                        }
+                    }
+                },
                 onClick = { showManageModelsSheet = true },
                 trailing = {
                     IconButton(
@@ -561,13 +616,14 @@ fun ProviderDetailScreen(
                             if (!isRefreshing) {
                                 isRefreshing = true
                                 refreshAuthError = false
+                                refreshOutcome = null
                                 scope.launch {
                                     try {
                                         // [T-codex-dynamic-discovery GH#319]
                                         // forceRefresh: this is the manual Refresh tap,
                                         // which must bypass the discovery cache — a
                                         // Refresh that returns a cached list is not one.
-                                        providerRepository.refreshModels(instance, forceRefresh = true)
+                                        refreshOutcome = providerRepository.refreshModels(instance, forceRefresh = true)
                                         AppLogger.info(TAG, "Refreshed models for ${instance.id}")
                                     } catch (e: com.openminis.app.data.repository.CodexDiscoveryAuthException) {
                                         AppLogger.warning(TAG, "Refresh rejected credential: ${e.message}")
@@ -688,6 +744,7 @@ fun ProviderDetailScreen(
  */
 private const val OAUTH_CONNECTED_PLACEHOLDER = "oauth"
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun OAuthCredentialBlock(
     instance: com.openminis.app.data.model.ProviderInstance,
@@ -840,23 +897,8 @@ private fun OAuthCredentialBlock(
         }
     }
     Spacer(modifier = Modifier.height(8.dp))
-    if (displayedKey.isNotEmpty() && needsReauth) {
-        Text(
-            stringResource(R.string.provider_oauth_sign_in_expired_detail),
-            color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodySmall,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        MinisSmallButton(
-            enabled = !isAuthenticating,
-            onClick = { startSignIn() },
-        ) {
-            Text(stringResource(R.string.provider_oauth_sign_in_again))
-        }
-        OAuthProgressLine(isAuthenticating = isAuthenticating, phase = oauthPhase, error = authError)
-        Spacer(modifier = Modifier.height(8.dp))
-    }
-    if (displayedKey.isNotEmpty()) {
+    // Sign Out, shared by the expired row below and the signed-in row.
+    val signOutButton: @Composable () -> Unit = {
         MinisSmallButton(
             onClick = {
                 // [T-android-openai-oauth-signout-signin-stuck] A real sign-out
@@ -881,6 +923,33 @@ private fun OAuthCredentialBlock(
         ) {
             Text(stringResource(R.string.provider_detail_sign_out))
         }
+    }
+    if (displayedKey.isNotEmpty() && needsReauth) {
+        Text(
+            stringResource(R.string.provider_oauth_sign_in_expired_detail),
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        // [T-oauth-reauth-buttons-one-row] Sign In Again and Sign Out side by
+        // side, as iOS ProviderInstanceDetailView lays them out (one HStack).
+        // They used to stack on two lines. FlowRow so a narrow screen or a long
+        // translation wraps the second button instead of squeezing it.
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            MinisSmallButton(
+                enabled = !isAuthenticating,
+                onClick = { startSignIn() },
+            ) {
+                Text(stringResource(R.string.provider_oauth_sign_in_again))
+            }
+            signOutButton()
+        }
+        OAuthProgressLine(isAuthenticating = isAuthenticating, phase = oauthPhase, error = authError)
+    } else if (displayedKey.isNotEmpty()) {
+        signOutButton()
     } else {
         MinisSmallButton(
             // Disabled while a sign-in runs, rather than silently ignoring taps.
@@ -1162,3 +1231,83 @@ private fun ManualBearerTokenSection(
 }
 
 
+/** [T-sse-idle-timeout] Presets plus a custom value in seconds (30–3600). */
+@Composable
+private fun ResponseIdleTimeoutSection(instanceId: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val setting = com.openminis.app.provider.ResponseIdleTimeoutSetting
+    var seconds by remember(instanceId) { mutableStateOf(setting.seconds(context, instanceId)) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var customOpen by remember { mutableStateOf(false) }
+    fun label(s: Int): String = when (s) {
+        120 -> context.getString(R.string.response_idle_timeout_2min_default)
+        300 -> context.getString(R.string.response_idle_timeout_5min)
+        600 -> context.getString(R.string.response_idle_timeout_10min)
+        1800 -> context.getString(R.string.response_idle_timeout_30min)
+        3600 -> context.getString(R.string.response_idle_timeout_60min)
+        else -> context.getString(R.string.response_idle_timeout_seconds, s)
+    }
+    fun apply(s: Int) {
+        setting.set(context, instanceId, s)
+        seconds = setting.seconds(context, instanceId)
+        AppLogger.info(TAG, "Set responseIdleTimeout=${seconds}s for $instanceId")
+    }
+    SettingsSection(
+        header = stringResource(R.string.provider_detail_response_idle_timeout),
+        footer = stringResource(R.string.provider_detail_response_idle_timeout_footer),
+    ) {
+        Box {
+            SettingsRow(
+                title = stringResource(R.string.provider_detail_response_idle_timeout),
+                onClick = { menuOpen = true },
+                showChevron = false,
+                showDivider = false,
+                trailing = { Text(label(seconds), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            )
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                for (preset in setting.PRESETS) {
+                    DropdownMenuItem(
+                        text = { Text(label(preset)) },
+                        onClick = { menuOpen = false; apply(preset) },
+                    )
+                }
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.response_idle_timeout_custom)) },
+                    onClick = { menuOpen = false; customOpen = true },
+                )
+            }
+        }
+    }
+    if (customOpen) {
+        var text by remember { mutableStateOf(seconds.toString()) }
+        val parsed = text.trim().toIntOrNull()
+        val valid = parsed != null && parsed in setting.MIN_SECONDS..setting.MAX_SECONDS
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { customOpen = false },
+            title = { Text(stringResource(R.string.provider_detail_response_idle_timeout)) },
+            text = {
+                androidx.compose.material3.OutlinedTextField(
+                    value = text,
+                    onValueChange = { v -> text = v.filter { it.isDigit() }.take(4) },
+                    singleLine = true,
+                    isError = !valid,
+                    label = { Text(stringResource(R.string.response_idle_timeout_seconds_field)) },
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                    ),
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    enabled = valid,
+                    onClick = { customOpen = false; parsed?.let { apply(it) } },
+                ) { Text(stringResource(R.string.save)) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { customOpen = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+}

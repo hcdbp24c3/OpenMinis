@@ -54,6 +54,10 @@ extension Notification.Name {
     static let sessionDidCreate = Notification.Name("sessionDidCreate")
     /// Posted when a session's title or messages are updated.
     static let sessionDidUpdate = Notification.Name("sessionDidUpdate")
+    /// [T-storage-session-cache] Posted after sessions were deleted outside
+    /// the sidebar (Settings › Storage). userInfo: ["ids": [String]]. The
+    /// sidebar drops the rows and closes the conversation if it was open.
+    static let sessionsDeletedElsewhere = Notification.Name("sessionsDeletedElsewhere")
     /// Posted when an agent loop ends on a VM that is not the currently-displayed one.
     /// `object` is the session ID (`String`). Allows the active VM to reload from DB.
     static let sessionAgentLoopDidEnd = Notification.Name("sessionAgentLoopDidEnd")
@@ -128,6 +132,10 @@ struct MinisApp: App {
         //
         // `install` is idempotent, so the later onAppLaunch() call is a no-op.
         CrashSignalHandler.install()
+        // [T-crash-breadcrumbs] Rotate the previous run's breadcrumbs and start
+        // this run's ring + 15 s resource sampling, before anything else runs.
+        CrashBreadcrumbs.start()
+        ResourceSampler.shared.start()
 
         // [T-git-vault] Migrate the legacy per-forge repo_digest tokens into the vault
         // and project the vault into the iSH rootfs, so `git clone` in the terminal is
@@ -186,7 +194,11 @@ struct MinisApp: App {
         AgentLiveActivityManager.shared.cleanupStaleActivities(source: "MinisApp.init")
         // Start screen-awake controller — it will observe running tasks
         // + the user's opt-in flag and toggle the idle timer accordingly.
-        Task { @MainActor in KeepScreenAwakeController.shared.start() }
+        Task { @MainActor in
+            KeepScreenAwakeController.shared.start()
+            // [T-always-on] Black screen + per-chat lease on top of Keep Screen Awake.
+            AlwaysOnController.shared.start()
+        }
         // [T-zombie-child-sweep] Retire sub agent sessions whose parent
         // conversation was truncated away — see sweepZombieChildSessions for
         // why a month-old floor is what makes this safe against sync ordering.
@@ -437,6 +449,8 @@ struct MinisApp: App {
                     BackgroundKeepAliveManager.shared.setup()
                     // Monitor network changes to keep iSH DNS up to date
                     NetworkMonitor.shared.start()
+                    // [T-provider-quota] Foreground-only upstream quota refresh.
+                    QuotaStore.shared.start()
                     // Register FileProvider domain for shared files
                     Self.registerFileProviderDomain()
                     // Migrate legacy shared dir to App Group container
@@ -588,7 +602,9 @@ struct MinisApp: App {
                 debugServer.restartIfDead(port: 8321)
                 #endif
 
-                try? await UNUserNotificationCenter.current().setBadgeCount(0)
+                // [T-mac-dock-badge] Back in the app: notifications posted while
+                // away are seen; the badge keeps only the running-task count.
+                BackgroundKeepAliveManager.shared.clearUnseenBadge()
                 BackgroundInterruptionTracker.shared.checkOnForeground()
                 // [T-shortcuts-diag-and-pending] Scan for AppIntent runs that
                 // were marked pending but never cleared (i.e. the process was

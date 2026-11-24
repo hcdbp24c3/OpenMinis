@@ -126,4 +126,131 @@ class OpenAIModelsApiParsingTest {
         assertNull("absent context_length must stay null", models[1].contextWindow)
         assertTrue("absent max_output_tokens must stay null", models.all { it.maxOutputTokens == null })
     }
+
+    // MARK: - [T-model-metadata-from-api] tolerant `reasoning` (refresh bug)
+
+    @Test
+    fun reasoningAsAnObjectCountsAsTrueAndDoesNotAbortTheList() {
+        // Token Harbor's shape. getBoolean("reasoning") threw here, the whole
+        // list was dropped and the refresh silently kept the old models.
+        val models = fetch(
+            """
+            {"object":"list","data":[
+              {"id":"vendor/model-a:free","reasoning":{"efforts":["low","high"]},"context_length":200000},
+              {"id":"vendor/model-b","reasoning":{"efforts":null}},
+              {"id":"vendor/model-c","reasoning":{"supported":false}},
+              {"id":"vendor/model-d","reasoning":{"enabled":false,"efforts":[]}},
+              {"id":"vendor/model-e"}
+            ]}
+            """.trimIndent(),
+        )
+
+        assertEquals(5, models.size)
+        assertEquals("the id keeps its suffix", "vendor/model-a:free", models[0].id)
+        assertEquals(true, models[0].supportsReasoning)
+        assertEquals(200_000, models[0].contextWindow)
+        assertEquals(true, models[1].supportsReasoning)
+        assertEquals(false, models[2].supportsReasoning)
+        assertEquals(false, models[3].supportsReasoning)
+        assertNull(models[4].supportsReasoning)
+    }
+
+    @Test
+    fun reasoningAsAStringIsParsedAndJunkIsAbsent() {
+        val models = fetch(
+            """
+            {"data":[
+              {"id":"m-true","reasoning":"true"},
+              {"id":"m-false","reasoning":"FALSE"},
+              {"id":"m-junk","reasoning":"sometimes"},
+              {"id":"m-number","reasoning":1},
+              {"id":"m-array","reasoning":["low"]},
+              {"id":"gpt-5.5","reasoning":"n/a"}
+            ]}
+            """.trimIndent(),
+        )
+
+        assertEquals(6, models.size)
+        assertEquals(true, models[0].supportsReasoning)
+        assertEquals(false, models[1].supportsReasoning)
+        assertNull(models[2].supportsReasoning)
+        assertNull(models[3].supportsReasoning)
+        assertNull(models[4].supportsReasoning)
+        assertEquals("unreadable -> the knownReasoning family rule fills in", true, models[5].supportsReasoning)
+    }
+
+    @Test
+    fun reportedReasoningReaderCoversEveryShape() {
+        fun r(json: String) = OpenAIModelsApi.reportedReasoning(org.json.JSONObject(json))
+        assertEquals(true, r("""{"reasoning":true}"""))
+        assertEquals(false, r("""{"reasoning":false}"""))
+        assertEquals(true, r("""{"reasoning":{}}"""))
+        assertEquals(true, r("""{"reasoning":{"supported":true}}"""))
+        assertEquals(false, r("""{"reasoning":{"supported":"false"}}"""))
+        assertEquals(true, r("""{"reasoning":" True "}"""))
+        assertNull(r("""{"reasoning":null}"""))
+        assertNull(r("""{"id":"m"}"""))
+        assertNull(r("""{"reasoning":0}"""))
+    }
+
+    @Test
+    fun anEntryWithoutAnIdIsSkippedNotFatal() {
+        val models = fetch(
+            """
+            {"data":[
+              {"object":"model","context_length":1000},
+              {"id":"","object":"model"},
+              {"id":"kept-model","reasoning":true},
+              null,
+              {"id":"   "}
+            ]}
+            """.trimIndent(),
+        )
+
+        assertEquals(listOf("kept-model"), models.map { it.id })
+        assertEquals(true, models[0].supportsReasoning)
+    }
+
+    @Test
+    fun aReportedReasoningFlagMarksTheModelAsEndpointDescribed() {
+        val models = fetch("""{"data":[{"id":"m-a","reasoning":false},{"id":"m-b"}]}""")
+        assertEquals(true, models[0].limitsReportedByEndpoint)
+        assertNull(models[1].limitsReportedByEndpoint)
+    }
+
+    // MARK: - [T-android-model-list-timeouts]
+
+    @Test
+    fun aSlowFirstResponseStillLoadsTheList() {
+        // The gateway that prompted this took 12.3 s on an uncached request;
+        // OkHttp's default read timeout is 10 s. 11 s here proves the list
+        // client no longer uses the default.
+        server.enqueue(
+            MockResponse().setResponseCode(200)
+                .setBody("""{"data":[{"id":"slow-model"}]}""")
+                .setHeadersDelay(11, java.util.concurrent.TimeUnit.SECONDS),
+        )
+        val models = runBlocking { OpenAIModelsApi.fetchModels("test-key", baseUrl()) }
+        assertEquals(listOf("slow-model"), models.map { it.id })
+    }
+
+    @Test
+    fun aNetworkFailureIsThrownWithAReadableReason() {
+        val dead = MockWebServer()
+        dead.start()
+        val url = dead.url("/v1").toString().trimEnd('/')
+        dead.shutdown()
+        val error = try {
+            runBlocking { OpenAIModelsApi.fetchModelsDetailed("test-key", url) }
+            null
+        } catch (e: java.io.IOException) {
+            e
+        }
+        assertTrue("a dead endpoint must throw, not return an empty list", error != null)
+        assertTrue(error!!.message, error.message!!.startsWith("could not reach the provider's model list"))
+        assertTrue(
+            OpenAIModelsApi.networkFailureMessage(java.net.SocketTimeoutException("timeout"))
+                .startsWith("the model list request timed out"),
+        )
+    }
 }

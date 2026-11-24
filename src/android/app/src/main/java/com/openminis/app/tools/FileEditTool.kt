@@ -73,48 +73,93 @@ object FileEditTool {
                 return ToolExecutionResult("Error: File not found: $path", false, toolTitle = toolTitle)
             }
 
-            val content = file.readText()
-
-            // Count occurrences
-            var count = 0
-            var searchFrom = 0
-            while (true) {
-                val idx = content.indexOf(oldString, searchFrom)
-                if (idx < 0) break
-                count++
-                searchFrom = idx + oldString.length
-            }
-
-            if (count == 0) {
-                return ToolExecutionResult("Error: old_string not found in $path", false, toolTitle = toolTitle)
-            }
-
-            if (count > 1 && !replaceAll) {
-                return ToolExecutionResult(
-                    "Error: old_string found $count times in $path. Use replace_all=true to replace all occurrences, " +
-                        "or provide a more specific old_string that matches exactly once.",
-                    false, toolTitle = toolTitle
+            // [T-port-filetool-size-guard] Read, replace and write back off
+            // the caller's thread with a timeout; an OutOfMemoryError becomes
+            // a tool error instead of killing the app.
+            try {
+                FileToolIO.run("Editing $path", writes = true) {
+                    edit(file, path, oldString, newString, replaceAll, toolTitle) {
+                        // [T-coding-m2-undo] Keep what the file looked like before
+                        // this edit so file_undo can put it back. Never throws.
+                        // Runs only when the edit is about to be written.
+                        FileJournal.record(FileJournal.dir(context, sessionId), path, file)
+                    }
+                }
+            } catch (e: FileToolIO.TimedOut) {
+                ToolExecutionResult("Error: ${e.message}", false, toolTitle = toolTitle, timedOut = true)
+            } catch (e: FileToolIO.OutOfMemory) {
+                ToolExecutionResult(
+                    "Error: ${e.message} Use the shell (e.g. sed or a script) for large files.",
+                    false, toolTitle = toolTitle,
                 )
             }
-
-            val newContent = if (replaceAll) {
-                content.replace(oldString, newString)
-            } else {
-                content.replaceFirst(oldString, newString)
-            }
-
-            // [T-coding-m2-undo] Keep what the file looked like before this
-            // write so file_undo can put it back. Never throws.
-            FileJournal.record(FileJournal.dir(context, sessionId), path, file)
-
-            file.writeText(newContent)
-            val replacements = if (replaceAll) count else 1
-            ToolExecutionResult(
-                "Edited $path ($replacements replacement(s), ${newContent.length} bytes)",
-                true, toolTitle = toolTitle
-            )
         } catch (e: Exception) {
             ToolExecutionResult("Error editing file: ${e.message}", false)
         }
+    }
+
+    /**
+     * Apply one file_edit to [file]. Pure apart from the file access, so tests
+     * can call it on a temp file.
+     */
+    internal fun edit(
+        file: java.io.File,
+        path: String,
+        oldString: String,
+        newString: String,
+        replaceAll: Boolean,
+        toolTitle: String,
+        beforeWrite: () -> Unit = {},
+    ): ToolExecutionResult {
+        // [T-port-filetool-size-guard] Refuse large files before reading
+        // them (iOS FileToolIO.maxEditBytes, same message): readText() of a
+        // multi-hundred-MB file threw OutOfMemoryError, which no caller
+        // catches, and killed the app.
+        val size = file.length()
+        if (size > FileToolIO.MAX_EDIT_BYTES) {
+            return ToolExecutionResult(
+                "Error: $path is $size bytes; file_edit handles files up to ${FileToolIO.MAX_EDIT_BYTES} bytes. " +
+                    "Use the shell (e.g. sed or a script) for larger files.",
+                false, toolTitle = toolTitle,
+            )
+        }
+
+        val content = file.readText()
+
+        // Count occurrences
+        var count = 0
+        var searchFrom = 0
+        while (true) {
+            val idx = content.indexOf(oldString, searchFrom)
+            if (idx < 0) break
+            count++
+            searchFrom = idx + oldString.length
+        }
+
+        if (count == 0) {
+            return ToolExecutionResult("Error: old_string not found in $path", false, toolTitle = toolTitle)
+        }
+
+        if (count > 1 && !replaceAll) {
+            return ToolExecutionResult(
+                "Error: old_string found $count times in $path. Use replace_all=true to replace all occurrences, " +
+                    "or provide a more specific old_string that matches exactly once.",
+                false, toolTitle = toolTitle
+            )
+        }
+
+        val newContent = if (replaceAll) {
+            content.replace(oldString, newString)
+        } else {
+            content.replaceFirst(oldString, newString)
+        }
+
+        beforeWrite()
+        file.writeText(newContent)
+        val replacements = if (replaceAll) count else 1
+        return ToolExecutionResult(
+            "Edited $path ($replacements replacement(s), ${newContent.length} bytes)",
+            true, toolTitle = toolTitle
+        )
     }
 }
