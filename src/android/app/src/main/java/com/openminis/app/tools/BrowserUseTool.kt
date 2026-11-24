@@ -12,7 +12,10 @@ object BrowserUseTool {
 
     const val NAME = "browser_use"
 
-    val description = """Control web browser with up to 3 tabs. Actions: navigate to URL, take screenshot, click elements, type text, get page text, scroll, get page info, execute JavaScript, find elements by selector, hover, get readable content, set user agent, get page backbone (DOM structure), fetch resource, manage tabs (new_tab, close_tab, list_tabs).""".trimIndent()
+    val description = """Control web browser with up to 3 tabs. Actions: navigate to URL, take screenshot, click elements, type text, get page text, scroll, get page info, execute JavaScript, find elements by selector, hover, get readable content, set user agent, get page backbone (DOM structure), fetch resource, manage tabs (new_tab, close_tab, list_tabs).""".trimIndent() +
+        // [M5-browser-devtools] snapshot / refs / wait / console / network /
+        // evaluate / inspect / storage / performance.
+        " " + com.openminis.app.browser.devtools.DevtoolsSchema.DESCRIPTION
 
     /**
      * Build the JSON tool definition for the Anthropic / OpenAI / Gemini API.
@@ -98,6 +101,15 @@ object BrowserUseTool {
             put("default", false)
             put("description", "When true on screenshot, capture the entire scrollable page by temporarily stretching the viewport to document.scrollHeight (height-capped at 32768 px). Default false captures only the current viewport.")
         })
+
+        // [M5-browser-devtools] Same parameter text as the live schema in AgentTools.
+        for (p in com.openminis.app.browser.devtools.DevtoolsSchema.PARAMS) {
+            properties.put(p.name, JSONObject().apply {
+                put("type", p.type)
+                put("description", p.description)
+                p.enumValues?.let { put("enum", JSONArray(it)) }
+            })
+        }
 
         val inputSchema = JSONObject()
         inputSchema.put("type", "object")

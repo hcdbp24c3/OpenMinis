@@ -266,9 +266,19 @@ class BrowserUseManager(
         }
     }
 
+    /**
+     * [M5-browser-devtools] This tab's console / network logs, page hook and
+     * the snapshot / wait / evaluate / inspect / storage / performance actions.
+     * Declared above `init` because the init block installs it.
+     */
+    private val devtools = com.openminis.app.browser.devtools.BrowserDevtools(webView) { js ->
+        evaluateJavascriptValue(js)
+    }
+
     init {
         configureWebView(webView, profile)
         webView.addJavascriptInterface(jsBridge, "__minis__")
+        devtools.install()
         setupWebViewClient()
         setupWebChromeClient()
         // Intercept page-triggered downloads (Content-Disposition attachment,
@@ -479,7 +489,24 @@ class BrowserUseManager(
                     )
             }
 
+            // [M5-browser-devtools] Marks the page boundary in the console log
+            // and injects the hook on WebViews without document-start scripts.
+            override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                devtools.onPageStarted(view, url)
+            }
+
+            // [M5-browser-devtools] HTTP error statuses (4xx/5xx) for any resource.
+            override fun onReceivedHttpError(
+                view: WebView,
+                request: WebResourceRequest,
+                errorResponse: android.webkit.WebResourceResponse,
+            ) {
+                devtools.onHttpError(request, errorResponse)
+            }
+
             override fun onPageFinished(view: WebView, url: String?) {
+                devtools.onPageFinished(view)
                 _isLoading.value = false
                 _currentURL.value = url ?: ""
                 _pageTitle.value = view.title ?: ""
@@ -510,6 +537,7 @@ class BrowserUseManager(
             override fun onReceivedError(
                 view: WebView, request: WebResourceRequest, error: WebResourceError
             ) {
+                devtools.onRequestFailed(request, error)
                 if (request.isForMainFrame) {
                     _isLoading.value = false
                     Log.e(TAG, "Navigation error: ${error.description}")
@@ -521,6 +549,8 @@ class BrowserUseManager(
             override fun shouldInterceptRequest(
                 view: WebView, request: WebResourceRequest
             ): android.webkit.WebResourceResponse? {
+                // [M5-browser-devtools] Record only; the request is not altered.
+                devtools.onRequest(request)
                 val url = request.url ?: return null
                 if (url.scheme != "minis") return null
                 return interceptMinisURL(url)
@@ -646,6 +676,14 @@ class BrowserUseManager(
                 _pageTitle.value = title ?: ""
             }
 
+            // [M5-browser-devtools] Every console.* call and uncaught error,
+            // with source URL and line. Returns false so WebView keeps
+            // writing them to logcat exactly as before.
+            override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
+                devtools.onConsoleMessage(consoleMessage)
+                return false
+            }
+
             override fun onCreateWindow(
                 view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message
             ): Boolean {
@@ -764,18 +802,25 @@ class BrowserUseManager(
                 else "browser tab stopped responding (${wedgeReason ?: "unknown"})",
             )
         }
+        // [M5-browser-devtools] A 'ref' that is not a snapshot ref must not
+        // silently fall back to the selector / coordinates of the same call.
+        if (input.refRaw != null && input.ref == null) {
+            return BrowserActionResult.error(
+                "'${input.refRaw.take(40)}' is not an element ref. Refs look like e12 and come from the snapshot action.",
+            )
+        }
         val prevUrl = withContext(Dispatchers.Main) { webView.url }
         var result: BrowserActionResult = when (input.action) {
             BrowserAction.NAVIGATE -> navigate(input.url)
             BrowserAction.SCREENSHOT -> return screenshot(fullPage = input.fullPage)
-            BrowserAction.CLICK -> click(input.selector, input.coordinateX, input.coordinateY)
-            BrowserAction.TYPE -> type(input.selector, input.text)
-            BrowserAction.GET_TEXT -> return getText(input.selector)
+            BrowserAction.CLICK -> click(input.selector, input.coordinateX, input.coordinateY, input.ref)
+            BrowserAction.TYPE -> type(input.selector, input.text, input.ref)
+            BrowserAction.GET_TEXT -> return getText(input.selector, input.ref)
             BrowserAction.SCROLL -> scroll(input.selector, input.direction, input.amount)
             BrowserAction.GET_PAGE_INFO -> return getPageInfo()
             BrowserAction.EXECUTE_JS -> return executeJS(input.script)
             BrowserAction.FIND_ELEMENTS -> return findElements(input.selector)
-            BrowserAction.HOVER -> hover(input.selector)
+            BrowserAction.HOVER -> hover(input.selector, input.ref)
             BrowserAction.GET_READABLE -> return getReadable()
             BrowserAction.SET_USER_AGENT -> return setUserAgent(input.userAgent, input.userAgentRaw)
             BrowserAction.SET_VIEWPORT ->
@@ -790,6 +835,11 @@ class BrowserUseManager(
             BrowserAction.WAIT_FOR_DOM_STABLE -> return waitForDomStable(input.timeoutMs)
             BrowserAction.NEW_TAB, BrowserAction.CLOSE_TAB, BrowserAction.LIST_TABS ->
                 return BrowserActionResult.error("Tab management actions must be routed through BrowserTabPool")
+            // [M5-browser-devtools] Text-only results: no auto-screenshot.
+            BrowserAction.SNAPSHOT, BrowserAction.WAIT, BrowserAction.SELECT_OPTION,
+            BrowserAction.CONSOLE, BrowserAction.NETWORK, BrowserAction.EVALUATE,
+            BrowserAction.INSPECT, BrowserAction.STORAGE, BrowserAction.PERFORMANCE ->
+                return devtools.execute(input)
         }
 
         // Auto-capture screenshot after visual-change actions
@@ -1203,26 +1253,48 @@ class BrowserUseManager(
 
     // -- Click --
 
-    private suspend fun click(selector: String?, x: Int?, y: Int?): BrowserActionResult {
+    private suspend fun click(selector: String?, x: Int?, y: Int?, ref: String? = null): BrowserActionResult {
+        if (ref != null) return runOnRef(ref, "click") { com.openminis.app.browser.devtools.DevtoolsJS.clickRef(it) }
         val js = when {
             selector != null -> BrowserUseJS.click(selector)
             x != null && y != null -> BrowserUseJS.clickCoordinate(x, y)
-            else -> return BrowserActionResult.error("click requires 'selector' or 'coordinate_x'/'coordinate_y'")
+            else -> return BrowserActionResult.error("click requires 'selector', 'ref' or 'coordinate_x'/'coordinate_y'")
         }
         return evaluateAndReturn(js)
     }
 
+    /**
+     * [M5-browser-devtools] Runs an existing selector action against the
+     * element behind a snapshot [ref]. [build] retargets the very script the
+     * selector form uses, so events and result shape are identical.
+     */
+    private suspend fun runOnRef(
+        ref: String,
+        action: String,
+        build: (String) -> String?,
+    ): BrowserActionResult {
+        val js = build(ref)
+            ?: return BrowserActionResult.error("$action does not accept 'ref' in this build - use 'selector'")
+        val result = evaluateAndReturn(js)
+        return if (result.success) result else result.copy(
+            text = com.openminis.app.browser.devtools.DevtoolsJS.explainRefError(result.text, ref),
+        )
+    }
+
     // -- Type --
 
-    private suspend fun type(selector: String?, text: String?): BrowserActionResult {
-        if (selector == null) return BrowserActionResult.error("type requires 'selector'")
+    private suspend fun type(selector: String?, text: String?, ref: String? = null): BrowserActionResult {
+        if (selector == null && ref == null) return BrowserActionResult.error("type requires 'selector' or 'ref'")
         if (text == null) return BrowserActionResult.error("type requires 'text'")
+        if (ref != null) return runOnRef(ref, "type") { com.openminis.app.browser.devtools.DevtoolsJS.typeRef(it, text) }
+        if (selector == null) return BrowserActionResult.error("type requires 'selector' or 'ref'")
         return evaluateAndReturn(BrowserUseJS.type(selector, text))
     }
 
     // -- Get Text --
 
-    private suspend fun getText(selector: String?): BrowserActionResult {
+    private suspend fun getText(selector: String?, ref: String? = null): BrowserActionResult {
+        if (ref != null) return runOnRef(ref, "get_text") { com.openminis.app.browser.devtools.DevtoolsJS.getTextRef(it) }
         val js = BrowserUseJS.getText(selector)
         return evaluateJSAndParse(js)
     }
@@ -1323,8 +1395,9 @@ class BrowserUseManager(
 
     // -- Hover --
 
-    private suspend fun hover(selector: String?): BrowserActionResult {
-        if (selector == null) return BrowserActionResult.error("hover requires 'selector'")
+    private suspend fun hover(selector: String?, ref: String? = null): BrowserActionResult {
+        if (ref != null) return runOnRef(ref, "hover") { com.openminis.app.browser.devtools.DevtoolsJS.hoverRef(it) }
+        if (selector == null) return BrowserActionResult.error("hover requires 'selector' or 'ref'")
         return evaluateAndReturn(BrowserUseJS.hover(selector))
     }
 

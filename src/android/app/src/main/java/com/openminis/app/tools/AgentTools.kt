@@ -194,7 +194,10 @@ object AgentTools {
             "Use get_cookies to retrieve cookies for the current page URL / current site root domain only (including HttpOnly cookies). get_cookies supports optional 'keywords' (filter by cookie name) and 'fuzzy' (true=contains match, false=exact match, default true). It returns only a summary and an offload env file path — raw cookie values are NOT included in the tool response. To reuse cookies in shell commands: `. /var/minis/offloads/env_cookies_xxx.sh && command`. You may define alias variables when needed. " +
             "Use set_cookies to write cookies into the current page's cookie store via the native cookie store (so even HttpOnly cookies, which JS cannot set, land). Pass a 'cookies' array of objects, each with name + value (required) and optional domain (defaults to the current page host), path (defaults to '/'), secure, http_only, and expires (Unix timestamp in seconds; omit for a session cookie). " +
             "Use wait_for_dom_stable to wait until the page DOM stops changing (useful after navigation or interactions that trigger async data loading — polls every 0.5s, resolves when mutation rate gradient is stable for 3+ intervals, default timeout 10s). " +
-            "Use tab_id to target a specific tab (defaults to the most recently used tab).",
+            "Use tab_id to target a specific tab (defaults to the most recently used tab). " +
+            // [M5-browser-devtools] snapshot / refs / wait / console / network /
+            // evaluate / inspect / storage / performance.
+            com.openminis.app.browser.devtools.DevtoolsSchema.DESCRIPTION,
         parameters = mapOf(
             "tool_title" to AgentToolParam("string", "A concise 5-10 word summary of what this tool call does, shown to the user (e.g. 'Open Wikipedia homepage', 'Take screenshot of current page'). Use the same language as the user."),
             "action" to AgentToolParam("string", "The browser action to perform",
@@ -228,9 +231,13 @@ object AgentTools {
             // rather than resizing a WKWebView), the cap and the truncation
             // reporting are identical.
             "full_page" to AgentToolParam("boolean", "For screenshot: capture the entire scrollable page by temporarily stretching the browser viewport to document.documentElement.scrollHeight. Default false captures the visible viewport only. Capped at 32768px tall; when capped, the result text includes 'Truncated: true' and the original height, so you can scroll and capture the remainder separately."),
-        ),
+        // [M5-browser-devtools] devtools parameters, appended after the existing ones.
+        ) + com.openminis.app.browser.devtools.DevtoolsSchema.PARAMS.associate {
+            it.name to AgentToolParam(it.type, it.description, enumValues = it.enumValues)
+        },
         required = listOf("tool_title", "action"),
-        propertyOrdering = listOf("tool_title", "action", "tab_id", "url", "selector", "text", "coordinate_x", "coordinate_y", "direction", "amount", "scroll_count", "item_selector", "script", "user_agent", "max_depth", "keywords", "fuzzy", "cookies", "timeout", "viewport_width", "viewport_height", "reset", "full_page"),
+        propertyOrdering = listOf("tool_title", "action", "tab_id", "url", "selector", "text", "coordinate_x", "coordinate_y", "direction", "amount", "scroll_count", "item_selector", "script", "user_agent", "max_depth", "keywords", "fuzzy", "cookies", "timeout", "viewport_width", "viewport_height", "reset", "full_page") +
+            com.openminis.app.browser.devtools.DevtoolsSchema.PARAMS.map { it.name },
     )
 
     // Aligned with iOS AIChatViewModel.swift:5059-5067

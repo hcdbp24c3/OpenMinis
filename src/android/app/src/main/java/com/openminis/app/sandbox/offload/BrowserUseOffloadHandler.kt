@@ -197,6 +197,22 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
         args.getInt("scroll-count", "scroll_count")?.let { obj.put("scroll_count", it) }
         args.getInt("timeout")?.let { obj.put("timeout", it) }
         if (args.hasFlag("fuzzy")) obj.put("fuzzy", true)
+        // [M5-browser-devtools] snapshot / wait / select_option / console /
+        // network / evaluate / inspect / storage / performance parameters.
+        args.get("ref")?.let { obj.put("ref", it) }
+        args.get("level")?.let { obj.put("level", it) }
+        args.getInt("since")?.let { obj.put("since", it) }
+        args.getInt("limit")?.let { obj.put("limit", it) }
+        args.get("filter")?.let { obj.put("filter", it) }
+        args.getInt("request-id", "request_id")?.let { obj.put("request_id", it) }
+        args.get("state")?.let { obj.put("state", it) }
+        args.get("url-contains", "url_contains")?.let { obj.put("url_contains", it) }
+        args.get("properties")?.let { obj.put("properties", it) }
+        if (args.hasFlag("clear")) obj.put("clear", true)
+        if (args.hasFlag("failed")) obj.put("failed", true)
+        if (args.hasFlag("network-idle", "network_idle")) obj.put("network_idle", true)
+        if (args.hasFlag("urls")) obj.put("urls", true)
+        if (args.hasFlag("all")) obj.put("interactive", false)
         args.get("keywords")?.let { raw ->
             // Comma- or whitespace-separated list.
             val tokens = raw.split(Regex("[,\\s]+"))
@@ -428,6 +444,16 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
             "go_back", "back"    -> "browser: go back"
             "reload"             -> "browser: reload"
             "find"               -> "browser: find ${txt ?: sel ?: ""}".trim()
+            // [M5-browser-devtools]
+            "snapshot"           -> "browser: page snapshot"
+            "wait"               -> "browser: wait"
+            "select_option"      -> "browser: select option"
+            "console"            -> "browser: read console"
+            "network"            -> "browser: read network log"
+            "evaluate"           -> "browser: evaluate JS"
+            "inspect"            -> "browser: inspect ${sel ?: ""}".trim()
+            "storage"            -> "browser: read storage"
+            "performance"        -> "browser: performance"
             else                 -> "browser: $action"
         }
     }
@@ -447,6 +473,8 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
         private val BOOLEAN_FLAGS = setOf(
             "compact", "quiet", "with-base64", "with_base64",
             "reset", "fuzzy", "help",
+            // [M5-browser-devtools]
+            "clear", "failed", "network-idle", "network_idle", "urls", "all",
         )
 
         // Error codes — match iOS NOFF_ERR_* constants.
@@ -497,6 +525,27 @@ ACTIONS:
                   the shell intact — write the array to a temp file first.
   scroll_and_collect --scroll-count <n> --item-selector <css> [--keywords <list>]
   wait_for_dom_stable [--timeout <ms>]
+
+DEVTOOLS ACTIONS:
+  snapshot        [--selector <css>] [--all] [--limit <n>] [--max-depth <n>] [--urls]
+                  Compact outline of the page with element refs (e1, e2 ...).
+                  Interactive elements only unless --all. Refs die on navigation.
+  click | type | hover | get_text   also take --ref <eN> instead of --selector
+  select_option   --selector <css> | --ref <eN>  --text <label-or-value>
+  wait            [--selector <css> | --ref <eN>] [--state visible|hidden|attached|detached]
+                  [--text <text>] [--url-contains <s>] [--network-idle] [--timeout <s>]
+                  All given conditions must hold. Timeout default 10s, max 30s.
+  console         [--level debug|log|info|warn|error] [--since <cursor>] [--filter <text>]
+                  [--limit <n>] [--clear]
+  network         [--failed] [--filter <text>] [--since <cursor>] [--limit <n>] [--clear]
+                  network --request-id <n>   headers + body preview of one request
+                  The first call also turns on fetch/XHR capture for this tab.
+  evaluate        --script <js>   Expression or statements (await allowed); the value
+                  comes back serialised. Runs with the page's own privileges.
+  inspect         --selector <css> | --ref <eN> [--properties <css-props>] [--limit <n>]
+  storage         [--keywords <list>]   Cookies, localStorage, sessionStorage of the
+                  current page only.
+  performance     Navigation timing, paints, LCP, resources, JS heap.
 
 COMMON OPTIONS:
   --tab-id <n>     Route the action to a specific tab (default: active tab)
