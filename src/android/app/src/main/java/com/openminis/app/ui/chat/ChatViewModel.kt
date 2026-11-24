@@ -6462,6 +6462,16 @@ class ChatViewModel(
                     // newest-provider/newest-text-model. Was firstOrNull().
                     applyNewChatDefaultModel()
                 }
+                // [T-default-thinking] A brand-new chat whose group names no
+                // level of its own starts at the app-wide default.
+                applyUserDefaultThinkingLevel(
+                    persisted = null,
+                    groupDefault = if (resolved && effectiveGroupId != null) {
+                        providerRepository.group(effectiveGroupId)?.defaultThinkingLevel
+                    } else {
+                        null
+                    },
+                )
                 return@launch
             }
 
@@ -6563,6 +6573,15 @@ class ChatViewModel(
                     if (resolved) _selectedGroupId.value = defaultGroupId
                 }
             }
+
+            // [T-default-thinking] A session that never stored a level and whose
+            // group names none falls back to the app-wide default. Runs after
+            // the model is resolved so the level can be fitted to it.
+            applyUserDefaultThinkingLevel(
+                persisted = persistedThinking,
+                groupDefault = _selectedGroupId.value
+                    ?.let { providerRepository.group(it)?.defaultThinkingLevel },
+            )
 
             // [T-HANG-DIAG] measure DB load + transform separately so a long
             // load on one stage is obvious in the trace.
@@ -7573,6 +7592,29 @@ class ChatViewModel(
             // fall back off a disabled member, so _activeEntryId is the truth).
             _activeEntryId.value?.let { providerRepository.lastUsedEntryId = it }
         }
+    }
+
+    /**
+     * [T-default-thinking] Start the session at the app-wide default thinking
+     * level (Settings > Tools) when neither the session nor its model group
+     * chose one. In memory only, like the group default on a draft: the first
+     * send flushes it to the row. Fitted to the model bound right now.
+     */
+    private fun applyUserDefaultThinkingLevel(
+        persisted: ThinkingLevel?,
+        groupDefault: ThinkingLevel?,
+    ) {
+        val wanted: ThinkingLevel = com.openminis.app.agent.DefaultThinking.fallbackFor(
+            persisted = persisted,
+            groupDefault = groupDefault,
+            userDefault = com.openminis.app.agent.DefaultThinking.get(context),
+        ) ?: return
+        val level: ThinkingLevel = com.openminis.app.agent.DefaultThinking.clampToModel(
+            level = wanted,
+            supportsReasoning = currentModelSupportsReasoning,
+            ceiling = currentModelMaxThinkingLevel,
+        )
+        if (_thinkingLevel.value != level) _thinkingLevel.value = level
     }
 
     /**

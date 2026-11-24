@@ -65,6 +65,11 @@ fun AgentToolsSettingsScreen(onBack: () -> Unit) {
         mutableStateOf(com.openminis.app.agent.userask.UserAskSettings.notifyInBackground(context))
     }
     var showWaitPicker by remember { mutableStateOf(false) }
+    // [T-default-thinking] The level a new chat starts with.
+    var defaultThinking by remember {
+        mutableStateOf(com.openminis.app.agent.DefaultThinking.get(context))
+    }
+    var showThinkingPicker by remember { mutableStateOf(false) }
 
     SettingsScaffold(title = stringResource(R.string.settings_agent_tools), onBack = onBack) {
         SettingsSection(footer = stringResource(R.string.agent_tools_browser_footer)) {
@@ -110,6 +115,49 @@ fun AgentToolsSettingsScreen(onBack: () -> Unit) {
                 // [T-ask-merge] Last row now: the "Ask user" switch moved into
                 // the single User Interaction switch further down.
                 showDivider = false,
+            )
+        }
+        // [T-default-thinking] Strings are literals, like the section below.
+        SettingsSection(
+            header = "Thinking",
+            footer = "The level a new chat starts with. A model group's own default " +
+                "and the level you pick inside a chat still win. It is lowered " +
+                "automatically for a model that cannot reach it, and turned off " +
+                "for a model that does not reason.",
+        ) {
+            SettingsValueRow(
+                title = "Default thinking level",
+                value = com.openminis.app.agent.DefaultThinking.label(defaultThinking),
+                onClick = { showThinkingPicker = true },
+                showDivider = false,
+            )
+        }
+        if (showThinkingPicker) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { showThinkingPicker = false },
+                title = { androidx.compose.material3.Text("Default thinking level") },
+                text = {
+                    androidx.compose.foundation.layout.Column {
+                        for (choice in com.openminis.app.agent.DefaultThinking.CHOICES) {
+                            SettingsChoiceRow(
+                                title = com.openminis.app.agent.DefaultThinking.label(choice),
+                                selected = choice == defaultThinking,
+                                onSelect = {
+                                    defaultThinking = choice
+                                    com.openminis.app.agent.DefaultThinking.set(context, choice)
+                                    showThinkingPicker = false
+                                },
+                                showDivider = false,
+                            )
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { showThinkingPicker = false }) {
+                        androidx.compose.material3.Text(stringResource(R.string.user_ask_cancel))
+                    }
+                },
             )
         }
         // [T-coding-m2-approval] Not a tool switch but the same kind of choice:
