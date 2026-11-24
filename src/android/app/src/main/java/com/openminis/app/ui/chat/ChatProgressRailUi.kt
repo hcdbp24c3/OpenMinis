@@ -1,39 +1,50 @@
 package com.openminis.app.ui.chat
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Popup
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 
 /**
@@ -88,42 +99,112 @@ internal class ChatProgressMarkerCache {
     }
 }
 
-private val RailWidth: Dp = 16.dp
-private val SlotHeight: Dp = 11.dp
-private const val PREVIEW_MS = 1_800L
+/**
+ * [T-chat-rail-scrub] First line of the reply that follows a user message, for
+ * the rail's preview bubble; empty when the turn has no reply text yet.
+ *
+ * Only called when the previewed message changes (a press, or a drag crossing
+ * onto another message), never per frame and never while streaming.
+ *
+ * @param nextUserMessageId the next user bubble's id, or null for the last one.
+ */
+internal fun chatProgressReplyPreview(
+    messages: List<ChatMessage>,
+    userMessageId: String,
+    nextUserMessageId: String?,
+): String {
+    var user = -1
+    var stop = -1
+    var i = 0
+    while (i < messages.size) {
+        val id = messages[i].id
+        if (user < 0) {
+            if (id == userMessageId) user = i
+        } else if (nextUserMessageId != null && id == nextUserMessageId) {
+            stop = i
+            break
+        }
+        i++
+    }
+    val reply: Int = ChatProgressRailModel.replyIndex(user, stop, messages.size) { index ->
+        val message = messages[index]
+        message.role == "assistant" && message.content.isNotBlank()
+    }
+    if (reply < 0) return ""
+    return ChatProgressRailModel.firstLine(messages[reply].content, ChatProgressRailModel.REPLY_MAX_CHARS)
+}
+
+/** Touch strip: everything the rail listens on. Was 16dp. */
+private val RailWidth: Dp = 24.dp
+/** Height of one tick's row. Was 11dp. */
+private val SlotHeight: Dp = 14.dp
+private val TickThickness: Dp = 3.dp
+private val ActiveTickThickness: Dp = 4.dp
+private val TickLength: Dp = 9.dp
+private val ActiveTickLength: Dp = 13.dp
+private val TickEndGap: Dp = 3.dp
+/** The faint track drawn behind the ticks while a finger is on the rail. */
+private val TrackWidth: Dp = 19.dp
+private val BubbleGap: Dp = 8.dp
+private val BubbleMaxWidth: Dp = 248.dp
+/** How far under the finger the bubble's bottom edge sits. */
+private val BubbleBelowFinger: Dp = 14.dp
+/** How long the bubble stays after the finger lifts. */
+private const val PREVIEW_MS = 1_200L
 
 /**
  * [T-chat-progress-rail] One tick per user message on the chat's right edge.
- * The tick for the message the viewport is in is highlighted; a tap jumps to
- * that message, a long press only shows its first line.
+ * The tick for the message the viewport is in is highlighted.
+ *
+ * [T-chat-rail-scrub] Touch, all inside the rail's own 24dp-wide strip:
+ *  - TAP a tick: jump to that message (tapping the message already in view
+ *    steps to the next one sharing the tick, as before).
+ *  - PRESS AND DRAG up or down: scrub. The message under the finger becomes
+ *    the highlighted one and the chat follows it. On a condensed rail the
+ *    finger's position inside a tick picks between the messages sharing it.
+ *  - PRESS AND HOLD without moving: preview only, no jump on release.
+ *  While a finger is down a bubble beside the rail shows the pointed message:
+ *  its position ("12/40"), its text and the first line of the reply. It
+ *  follows the finger and fades out [PREVIEW_MS] after release.
+ *
+ * A press that turns into a SIDEWAYS swipe is dropped without consuming it,
+ * so the system edge-back gesture and horizontal swipes are untouched.
  *
  * Cost: scrolling re-evaluates one `derivedStateOf` (a couple of map lookups
  * and a scan over an IntArray, no allocation) and, only when the highlighted
- * tick actually changes, redraws this one canvas. The chat screen and the
- * message rows are not recomposed by it.
- *
- * Touch: the rail only listens for taps and long presses inside its own
- * 16dp-wide strip. It does not handle drags, so the system edge-back swipe and
- * horizontal swipes are untouched; a vertical drag that STARTS on the strip
- * does not scroll the list.
+ * tick actually changes, redraws this one canvas. A drag writes the finger's
+ * position to a state read only in the draw and layout phases, so it
+ * recomposes nothing; the bubble's content recomposes only when the pointed
+ * message changes, and the list is asked to scroll only then too. Jumps go
+ * through a conflated channel: a fast drag skips the messages the list did
+ * not have time to show instead of queueing them up.
  *
  * @param markers the user messages, oldest first.
  * @param rowIndexByKey position of every list row by key (oldest row = 0).
- * @param onJump called with the message id to scroll to.
+ * @param onJump scrolls to the message with this id.
+ * @param replyPreview first line of the reply to a user message, given its id
+ *   and the next user message's id (null for the last one).
  */
 @Composable
 internal fun ChatProgressRail(
     markers: () -> List<ChatProgressRailModel.Marker>,
     rowIndexByKey: () -> Map<String, Int>,
     listState: LazyListState,
-    onJump: (String) -> Unit,
+    onJump: suspend (String) -> Unit,
+    replyPreview: (String, String?) -> String,
     modifier: Modifier = Modifier,
 ) {
     val list: List<ChatProgressRailModel.Marker> = markers()
     if (list.size < ChatProgressRailModel.MIN_MARKERS) return
 
     val activeColor: Color = MaterialTheme.colorScheme.primary
-    val idleColor: Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f)
+    val idleColor: Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.32f)
+    val trackColor: Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+    val bubbleColor: Color = MaterialTheme.colorScheme.inverseSurface
+    val bubbleText: Color = MaterialTheme.colorScheme.inverseOnSurface
+    val haptics = LocalHapticFeedback.current
+    val jump = rememberUpdatedState(onJump)
+    val reply = rememberUpdatedState(replyPreview)
 
     BoxWithConstraints(modifier = modifier.width(RailWidth)) {
         val room: Int = (maxHeight.value / SlotHeight.value).toInt()
@@ -163,11 +244,27 @@ internal fun ChatProgressRail(
             }
         }
 
-        var previewIndex by remember(list) { mutableIntStateOf(-1) }
-        LaunchedEffect(previewIndex) {
-            if (previewIndex >= 0) {
+        // The marker in the bubble (-1: no bubble), whether a finger is on the
+        // rail, and where it is (px from the top of the tick area).
+        val shown = remember(list) { mutableIntStateOf(-1) }
+        val holding = remember(list) { mutableStateOf(false) }
+        val fingerY = remember(list) { mutableFloatStateOf(0f) }
+        val bubbleHeight = remember { mutableIntStateOf(0) }
+
+        // Marker indices to scroll to. Conflated: while the list is still
+        // landing one jump, only the newest request is kept.
+        val jumps = remember { Channel<Int>(Channel.CONFLATED) }
+        LaunchedEffect(list) {
+            for (index in jumps) {
+                if (index >= 0 && index < list.size) jump.value(list[index].messageId)
+            }
+        }
+        val isHolding: Boolean = holding.value
+        val shownIndex: Int = shown.intValue
+        LaunchedEffect(isHolding, shownIndex) {
+            if (!isHolding && shownIndex >= 0) {
                 delay(PREVIEW_MS)
-                previewIndex = -1
+                shown.intValue = -1
             }
         }
 
@@ -180,70 +277,176 @@ internal fun ChatProgressRail(
                 .width(RailWidth)
                 .height(railHeight)
                 .pointerInput(list, slots) {
-                    detectTapGestures(
-                        onTap = { offset ->
-                            val slot = ChatProgressRailModel.slotAt(offset.y, size.height.toFloat(), slots)
-                            val target = ChatProgressRailModel.tapTarget(slot, list.size, slots, active.value)
-                            if (target in list.indices) {
-                                previewIndex = target
-                                onJump(list[target].messageId)
+                    val slop: Float = viewConfiguration.touchSlop
+                    val longPressMs: Long = viewConfiguration.longPressTimeoutMillis
+                    awaitEachGesture {
+                        val down: PointerInputChange = awaitFirstDown(requireUnconsumed = false)
+                        val railPx: Float = size.height.toFloat()
+                        var target: Int = ChatProgressRailModel.markerAt(
+                            down.position.y, railPx, list.size, slots,
+                        )
+                        if (target < 0 || target >= list.size) return@awaitEachGesture
+                        down.consume()
+                        fingerY.floatValue = down.position.y
+                        shown.intValue = target
+                        holding.value = true
+                        var scrubbing = false
+                        var lifted = false
+                        var liftedAt = 0L
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                var change: PointerInputChange? = null
+                                for (candidate in event.changes) {
+                                    if (candidate.id == down.id) change = candidate
+                                }
+                                val current: PointerInputChange = change ?: break
+                                if (!current.pressed) {
+                                    lifted = true
+                                    liftedAt = current.uptimeMillis
+                                    current.consume()
+                                    break
+                                }
+                                if (!scrubbing) {
+                                    val decision: Int = ChatProgressRailModel.dragDecision(
+                                        current.position.x - down.position.x,
+                                        current.position.y - down.position.y,
+                                        slop,
+                                    )
+                                    // Sideways: not ours. Leave it unconsumed.
+                                    if (decision == ChatProgressRailModel.DRAG_NOT_OURS) break
+                                    if (decision == ChatProgressRailModel.DRAG_SCRUB) {
+                                        scrubbing = true
+                                        jumps.trySend(target)
+                                    }
+                                }
+                                if (scrubbing) {
+                                    current.consume()
+                                    fingerY.floatValue = current.position.y
+                                    val pointed: Int = ChatProgressRailModel.markerAt(
+                                        current.position.y, railPx, list.size, slots,
+                                    )
+                                    if (pointed != target && pointed >= 0 && pointed < list.size) {
+                                        target = pointed
+                                        shown.intValue = pointed
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        jumps.trySend(pointed)
+                                    }
+                                }
                             }
-                        },
-                        onLongPress = { offset ->
-                            val slot = ChatProgressRailModel.slotAt(offset.y, size.height.toFloat(), slots)
-                            val target = ChatProgressRailModel.slotStart(slot, list.size, slots)
-                            if (target in list.indices) previewIndex = target
-                        },
-                    )
+                        } finally {
+                            // Also reached when the system takes the gesture
+                            // away (edge-back): the bubble then times out.
+                            holding.value = false
+                        }
+                        if (lifted && !scrubbing) {
+                            // A tap jumps; a long still press was a preview.
+                            if (liftedAt - down.uptimeMillis < longPressMs) {
+                                val tapped: Int = ChatProgressRailModel.tapTargetAt(
+                                    target, list.size, slots, active.value,
+                                )
+                                if (tapped >= 0 && tapped < list.size) {
+                                    shown.intValue = tapped
+                                    jumps.trySend(tapped)
+                                }
+                            }
+                        } else if (!lifted && !scrubbing) {
+                            // Turned into a sideways swipe: get out of its way.
+                            shown.intValue = -1
+                        }
+                    }
                 },
         ) {
-            val activeSlot: Int = if (active.value < 0) -1
-            else ChatProgressRailModel.slotOf(active.value, list.size, slots)
+            val held: Boolean = holding.value
+            val pointed: Int = shown.intValue
+            val marker: Int = if (held && pointed >= 0) pointed else active.value
+            val activeSlot: Int = if (marker < 0) -1
+            else ChatProgressRailModel.slotOf(marker, list.size, slots)
             val slotPx: Float = size.height / slots
-            val thick: Float = 2.dp.toPx()
-            val idleLen: Float = 6.dp.toPx()
-            val activeLen: Float = 10.dp.toPx()
-            val endGap: Float = 3.dp.toPx()
-            val radius = CornerRadius(thick / 2f, thick / 2f)
+            val endGap: Float = TickEndGap.toPx()
+            if (held) {
+                val trackWidth: Float = TrackWidth.toPx()
+                drawRoundRect(
+                    color = trackColor,
+                    topLeft = Offset(size.width - trackWidth, 0f),
+                    size = Size(trackWidth, size.height),
+                    cornerRadius = CornerRadius(trackWidth / 2f, trackWidth / 2f),
+                )
+            }
             var s = 0
             while (s < slots) {
                 val isActive = s == activeSlot
-                val len = if (isActive) activeLen else idleLen
+                val len: Float = (if (isActive) ActiveTickLength else TickLength).toPx()
+                val thick: Float = (if (isActive) ActiveTickThickness else TickThickness).toPx()
                 drawRoundRect(
                     color = if (isActive) activeColor else idleColor,
                     topLeft = Offset(size.width - endGap - len, slotPx * s + (slotPx - thick) / 2f),
                     size = Size(len, thick),
-                    cornerRadius = radius,
+                    cornerRadius = CornerRadius(thick / 2f, thick / 2f),
                 )
                 s++
             }
         }
 
-        val shown: Int = previewIndex
-        if (shown >= 0 && shown < list.size && list[shown].preview.isNotEmpty()) {
-            val density = LocalDensity.current
-            val slot: Int = ChatProgressRailModel.slotOf(shown, list.size, slots)
-            val offset: IntOffset = with(density) {
-                IntOffset(
-                    x = -(RailWidth + 6.dp).roundToPx(),
-                    y = (topGap + SlotHeight * slot - 10.dp).roundToPx().coerceAtLeast(0),
-                )
+        if (shownIndex >= 0 && shownIndex < list.size) {
+            val pointedMarker: ChatProgressRailModel.Marker = list[shownIndex]
+            val nextId: String? = if (shownIndex + 1 < list.size) list[shownIndex + 1].messageId else null
+            val replyText: String = remember(pointedMarker.messageId, nextId) {
+                reply.value(pointedMarker.messageId, nextId)
             }
-            Popup(alignment = Alignment.TopEnd, offset = offset) {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.inverseSurface,
-                    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
-                    shadowElevation = 4.dp,
-                ) {
+            val density = LocalDensity.current
+            val railTopPx: Int = with(density) { topGap.roundToPx() }
+            val belowPx: Int = with(density) { BubbleBelowFinger.roundToPx() }
+            val leftPx: Int = with(density) { (RailWidth + BubbleGap).roundToPx() }
+            val boxHeightPx: Int = constraints.maxHeight
+            val shape = RoundedCornerShape(12.dp)
+            // Laid out past the rail's own 24dp (unbounded) and moved with a
+            // layout-phase offset: following the finger recomposes nothing.
+            // Plain Column, not a Surface, so it never swallows touches.
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .wrapContentSize(align = Alignment.TopEnd, unbounded = true)
+                    .offset {
+                        IntOffset(
+                            x = -leftPx,
+                            y = ChatProgressRailModel.bubbleTop(
+                                railTopPx + fingerY.floatValue,
+                                bubbleHeight.intValue,
+                                boxHeightPx,
+                                belowPx,
+                            ),
+                        )
+                    }
+                    .onSizeChanged { bubbleHeight.intValue = it.height }
+                    .widthIn(max = BubbleMaxWidth)
+                    .shadow(6.dp, shape)
+                    .background(bubbleColor, shape)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    text = ChatProgressRailModel.positionLabel(shownIndex, list.size),
+                    color = bubbleText.copy(alpha = 0.7f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+                Text(
+                    text = pointedMarker.preview.ifEmpty { "(no text)" },
+                    color = bubbleText,
+                    fontSize = 13.sp,
+                    lineHeight = 17.sp,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (replyText.isNotEmpty()) {
                     Text(
-                        text = list[shown].preview,
+                        text = "\u21B3 " + replyText,
+                        color = bubbleText.copy(alpha = 0.7f),
                         fontSize = 12.sp,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .widthIn(max = 220.dp)
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(top = 3.dp),
                     )
                 }
             }

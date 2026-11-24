@@ -5787,9 +5787,11 @@ fun ChatScreen(
                 }
 
                 // [T-chat-progress-rail] One tick per user message on the right
-                // edge; tap a tick to jump there. Kept clear of the header at
-                // the top and of the two scroll buttons at the bottom. Both
-                // inputs are lambdas so this screen is not recomposed by them.
+                // edge; tap a tick to jump there, or press and drag along the
+                // rail to scrub with a preview bubble ([T-chat-rail-scrub]).
+                // Kept clear of the header at the top and of the two scroll
+                // buttons at the bottom. Both inputs are lambdas so this
+                // screen is not recomposed by them.
                 ChatProgressRail(
                     markers = { railMarkers.value },
                     rowIndexByKey = { flatRowIndexByKey.value },
@@ -5798,8 +5800,9 @@ fun ChatScreen(
                         // A browse action, like the up-button: do not let
                         // streaming pull the viewport back down afterwards.
                         userScrolledAway = true
-                        coroutineScope.launch { scrollToUserMessage(id) }
+                        scrollToUserMessage(id)
                     },
+                    replyPreview = { id, nextId -> chatProgressReplyPreview(messages, id, nextId) },
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
                         .padding(top = 96.dp, bottom = 190.dp, end = fabEndInset)
