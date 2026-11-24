@@ -232,41 +232,68 @@ class ChatProgressRailModelTest {
     }
 
     @Test
-    fun bubbleSitsAboveTheFingerAndStaysInsideTheBounds() {
-        // Bottom edge 10px under the finger.
-        assertEquals(210, m.bubbleTop(300f, 100, 0, 1000, 10))
-        // Near the top: pinned to the top bound.
-        assertEquals(0, m.bubbleTop(20f, 100, 0, 1000, 10))
-        // Near the bottom: pinned to the bottom bound.
-        assertEquals(900, m.bubbleTop(995f, 100, 0, 1000, 10))
-        // A bubble taller than the bounds, or not measured yet.
-        assertEquals(0, m.bubbleTop(300f, 2000, 0, 1000, 10))
-        assertEquals(310, m.bubbleTop(300f, 0, 0, 1000, 10))
+    fun bubbleIsCentredOnTheTickOfThePointedMessage() {
+        // Rail of 10 ticks, 1000px tall, starting 200px down; bubble 100px.
+        // Tick 0 centre = 250, tick 4 centre = 650, tick 9 centre = 1150.
+        assertEquals(200, m.bubbleTopAtSlot(0, 10, 200, 1000, 100, -500, 3000))
+        assertEquals(600, m.bubbleTopAtSlot(4, 10, 200, 1000, 100, -500, 3000))
+        assertEquals(1100, m.bubbleTopAtSlot(9, 10, 200, 1000, 100, -500, 3000))
+        // Not measured yet: the top edge is on the tick's centre.
+        assertEquals(650, m.bubbleTopAtSlot(4, 10, 200, 1000, 0, -500, 3000))
     }
 
     @Test
-    fun bubbleFollowsTheFingerPastTheRailUpToTheChatArea() {
-        // Chat area from 250px above the rail's box to 1500px below its top.
-        // Finger above the box: the bubble goes up with it.
-        assertEquals(-190, m.bubbleTop(-100f, 100, -250, 1500, 10))
-        // ...until the top of the chat area.
-        assertEquals(-250, m.bubbleTop(-400f, 100, -250, 1500, 10))
-        // Finger below the box (1000px tall): the bubble goes down with it.
-        assertEquals(1110, m.bubbleTop(1200f, 100, -250, 1500, 10))
-        // ...until the bottom of the chat area.
-        assertEquals(1400, m.bubbleTop(1495f, 100, -250, 1500, 10))
-        assertEquals(1400, m.bubbleTop(5000f, 100, -250, 1500, 10))
-        // Inside the box nothing changes.
-        assertEquals(210, m.bubbleTop(300f, 100, -250, 1500, 10))
+    fun bubbleStaysAtTheFirstOrLastTickWhenTheFingerLeavesTheTicks() {
+        // A finger far above or below the rail still points at the first or
+        // last marker (markerAt clamps), so the bubble sits at that tick.
+        val above: Int = m.markerAt(-900f, 1000f, 10, 10)
+        val below: Int = m.markerAt(5000f, 1000f, 10, 10)
+        assertEquals(0, above)
+        assertEquals(9, below)
+        assertEquals(200, m.bubbleTopAtSlot(m.slotOf(above, 10, 10), 10, 200, 1000, 100, -500, 3000))
+        assertEquals(1100, m.bubbleTopAtSlot(m.slotOf(below, 10, 10), 10, 200, 1000, 100, -500, 3000))
+        // A slot outside the rail is treated as the nearest end too.
+        assertEquals(200, m.bubbleTopAtSlot(-3, 10, 200, 1000, 100, -500, 3000))
+        assertEquals(1100, m.bubbleTopAtSlot(42, 10, 200, 1000, 100, -500, 3000))
     }
 
     @Test
-    fun bubbleTallerThanTheChatAreaIsPinnedToItsTop() {
-        assertEquals(-250, m.bubbleTop(300f, 2000, -250, 1500, 10))
-        assertEquals(-250, m.bubbleTop(300f, 1750, -250, 1500, 10))
-        // Empty or inverted bounds never throw.
-        assertEquals(40, m.bubbleTop(300f, 100, 40, 40, 10))
-        assertEquals(40, m.bubbleTop(300f, 100, 40, 0, 10))
+    fun bubbleOnAShortRailSitsBesideItsTickNotAtTheBoxTop() {
+        // 3 ticks, 120px of rail centred in a 1000px box (rail top 440).
+        // Tick centres: 460, 500, 540. The bubble (200px) is taller than the
+        // rail and sticks out of it at both ends, still centred on its tick.
+        assertEquals(360, m.bubbleTopAtSlot(0, 3, 440, 120, 200, -250, 1500))
+        assertEquals(400, m.bubbleTopAtSlot(1, 3, 440, 120, 200, -250, 1500))
+        assertEquals(440, m.bubbleTopAtSlot(2, 3, 440, 120, 200, -250, 1500))
+    }
+
+    @Test
+    fun bubbleIsOnlyNudgedToStayInsideTheChatArea() {
+        // First tick near the top of the chat area: pushed down to the bound.
+        assertEquals(0, m.bubbleTopAtSlot(0, 10, 0, 1000, 300, 0, 1000))
+        // Last tick near the bottom: pushed up to the bound.
+        assertEquals(700, m.bubbleTopAtSlot(9, 10, 0, 1000, 300, 0, 1000))
+        // Bounds reaching above the rail's box (negative top) are honoured.
+        assertEquals(-100, m.bubbleTopAtSlot(0, 10, 0, 1000, 300, -250, 1500))
+        // A bubble taller than the chat area is pinned to its top.
+        assertEquals(-250, m.bubbleTopAtSlot(4, 10, 0, 1000, 2000, -250, 1500))
+        // Empty or inverted bounds, or no ticks, never throw.
+        assertEquals(40, m.bubbleTopAtSlot(4, 10, 0, 1000, 100, 40, 40))
+        assertEquals(40, m.bubbleTopAtSlot(4, 10, 0, 1000, 100, 40, 0))
+        assertEquals(450, m.bubbleTopAtSlot(0, 0, 0, 1000, 100, -250, 1500))
+    }
+
+    @Test
+    fun bubbleStaysPutWhileScrubbingThroughMessagesThatShareATick() {
+        // 100 messages on 10 ticks: messages 40..49 share tick 4.
+        var index = 40
+        while (index < 50) {
+            assertEquals(4, m.slotOf(index, 100, 10))
+            assertEquals(600, m.bubbleTopAtSlot(m.slotOf(index, 100, 10), 10, 200, 1000, 100, -500, 3000))
+            index++
+        }
+        // The next message is on the next tick: the bubble snaps down one.
+        assertEquals(700, m.bubbleTopAtSlot(m.slotOf(50, 100, 10), 10, 200, 1000, 100, -500, 3000))
     }
 
     @Test
@@ -296,8 +323,11 @@ class ChatProgressRailModelTest {
     @Test
     fun theRailScrubsWithoutRecomposingAndNeverClaimsSidewaysSwipes() {
         val rail: String = ProductionSources.read("ui/chat/ChatProgressRailUi.kt")
-        // The finger position moves the bubble in the layout phase.
+        // The bubble is placed in the layout phase, beside a tick, and never
+        // from the raw finger position.
         assertTrue(rail.contains(".offset {"))
+        assertTrue(rail.contains("bubbleTopAtSlot("))
+        assertTrue(!rail.contains("fingerY"))
         // Jumps are conflated, so a fast drag cannot queue up scrolls.
         assertTrue(rail.contains("Channel.CONFLATED"))
         // A sideways drag leaves the gesture before anything is consumed.

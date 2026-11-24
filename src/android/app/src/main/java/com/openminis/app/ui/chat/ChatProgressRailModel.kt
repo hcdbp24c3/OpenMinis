@@ -217,17 +217,31 @@ internal object ChatProgressRailModel {
 
     /**
      * Top edge of the preview bubble, in px, in the same coordinates as
-     * [fingerY], [minTop] and [maxBottom].
+     * [railTop], [minTop] and [maxBottom].
      *
-     * The bubble sits mostly ABOVE the finger (its bottom edge [below] px
-     * under it) so the thumb does not cover the text. It follows the finger
-     * freely, also past the ends of the rail, and is only kept between
-     * [minTop] and [maxBottom]: the visible chat area, which may start above
-     * the rail's own box ([minTop] negative) and end below it. A bubble
+     * The bubble is centred on the tick [slot] of a rail drawn from [railTop]
+     * and [railHeight] tall with [slots] ticks. It snaps from tick to tick and
+     * never follows the raw finger: a [slot] outside the rail counts as the
+     * first or last tick, so the bubble cannot leave the span of the ticks.
+     * The only shift allowed is the one that keeps the whole bubble between
+     * [minTop] and [maxBottom], the visible chat area (which may start above
+     * the rail's own box, [minTop] negative, and end below it). A bubble
      * taller than that span is pinned to [minTop].
      */
-    fun bubbleTop(fingerY: Float, bubbleHeight: Int, minTop: Int, maxBottom: Int, below: Int): Int {
-        val wanted = (fingerY + below - bubbleHeight).toInt()
+    fun bubbleTopAtSlot(
+        slot: Int,
+        slots: Int,
+        railTop: Int,
+        railHeight: Int,
+        bubbleHeight: Int,
+        minTop: Int,
+        maxBottom: Int,
+    ): Int {
+        val count = if (slots <= 0) 1 else slots
+        val s = slot.coerceIn(0, count - 1)
+        // Centre of the tick: (s + 0.5) / count of the way down the rail.
+        val centre = railTop.toLong() + (railHeight.toLong() * (2L * s + 1L)) / (2L * count)
+        val wanted = (centre - bubbleHeight / 2).toInt()
         val maxTop = maxBottom - bubbleHeight
         if (maxTop <= minTop) return minTop
         return wanted.coerceIn(minTop, maxTop)
