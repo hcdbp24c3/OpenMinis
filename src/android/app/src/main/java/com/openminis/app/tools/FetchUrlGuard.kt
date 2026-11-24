@@ -1,6 +1,8 @@
 package com.openminis.app.tools
 
 import okhttp3.Dns
+import okhttp3.Interceptor
+import java.io.IOException
 import java.net.InetAddress
 import java.net.URI
 import java.net.UnknownHostException
@@ -18,6 +20,12 @@ import java.net.UnknownHostException
  *    connection actually used is checked — and it is consulted again for each
  *    redirect hop, which is exactly how "public URL that 302s to 169.254.169.254"
  *    (cloud metadata) gets stopped.
+ *  - [T-web-m5] [hopGuard] is a network interceptor on the same client: it runs
+ *    [blockedReason] and the port rule on EVERY hop's URL before that hop's
+ *    request is written. It closes the one gap the DNS layer has — OkHttp does
+ *    not ask a custom `Dns` about an IP-literal host, so a redirect straight to
+ *    `http://169.254.169.254/` or `http://10.0.0.1/` was only noticed after the
+ *    response had come back.
  *
  * This matters because the caller is a language model reading untrusted content:
  * a page can tell it to fetch a cloud-metadata endpoint, and without this the
@@ -60,6 +68,28 @@ object FetchUrlGuard {
             }
             return resolved
         }
+    }
+
+    /**
+     * [T-web-m5] Non-null = this hop must not be requested. [blockedReason] on
+     * the hop URL (fragment ignored: it is never sent) plus the port rule the
+     * fetch tool applies to the final URL, so an odd port is refused before the
+     * request rather than after the response.
+     */
+    internal fun hopBlockedReason(url: String, port: Int): String? {
+        val hash = url.indexOf('#')
+        val bare = if (hash >= 0) url.substring(0, hash) else url
+        blockedReason(bare)?.let { return it }
+        if (port != 80 && port != 443) return "non-standard port $port"
+        return null
+    }
+
+    /** OkHttp network interceptor applying [hopBlockedReason] to every hop, redirects included. */
+    internal fun hopGuard(): Interceptor = Interceptor { chain ->
+        val request = chain.request()
+        val reason = hopBlockedReason(request.url.toString(), request.url.port)
+        if (reason != null) throw IOException("Blocked request hop: $reason")
+        chain.proceed(request)
     }
 
     /** True for anything that is not a globally routable unicast address. */

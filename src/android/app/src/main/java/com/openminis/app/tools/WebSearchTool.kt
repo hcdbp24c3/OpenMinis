@@ -38,6 +38,14 @@ object WebSearchTool {
     private const val MAX_RESULTS = 8
     private const val TIMEOUT_MS = 15_000
 
+    // [T-web-m5] fetch_top bounds: pages, characters shared between them, and time.
+    private const val MAX_FETCH_TOP = 3
+    private const val EXCERPT_BUDGET_CHARS = 6_000
+    private const val EXCERPT_TIMEOUT_SECONDS = 12
+    private const val EXCERPT_DEADLINE_SECONDS = 20L
+    private const val MAX_TITLE_CHARS = 200
+    private const val MAX_SNIPPET_CHARS = 600
+
     data class Result(
         val title: String,
         val url: String,
@@ -50,7 +58,10 @@ object WebSearchTool {
             "Use this for facts, docs, news, and package versions instead of opening a browser. " +
             "Follow up with browser_use only when you need to interact with a specific page. " +
             "Uses Settings → Web search. First-class backends: Tavily, Bocha, Exa, Brave, Jina, Zhipu, Bing, SearXNG. " +
-            "Falls back to DuckDuckGo, then suggest browser_use for a specific URL.",
+            "Falls back to DuckDuckGo, then suggest browser_use for a specific URL. " +
+            "Optional filters: include_domains / exclude_domains, recency, max_per_domain. " +
+            "Set fetch_top to also get a short main-content excerpt of the first results in the same call; " +
+            "read a result fully with web_fetch.",
         parameters = mapOf(
             "tool_title" to AgentToolParam(
                 "string",
@@ -58,10 +69,86 @@ object WebSearchTool {
             ),
             "query" to AgentToolParam("string", "Search query. Be specific; include version numbers or site: filters when useful."),
             "max_results" to AgentToolParam("integer", "How many results to return (default 5, max 8)."),
+            "include_domains" to AgentToolParam(
+                "string",
+                "Only return results from these domains (comma-separated, subdomains included), e.g. 'developer.android.com, kotlinlang.org'.",
+            ),
+            "exclude_domains" to AgentToolParam(
+                "string",
+                "Drop results from these domains (comma-separated, subdomains included), e.g. 'pinterest.com, quora.com'.",
+            ),
+            "recency" to AgentToolParam(
+                "string",
+                "Only results from the last day, week, month or year. Applied when the search backend supports it; the output says when it could not be.",
+                enumValues = listOf("day", "week", "month", "year"),
+            ),
+            "max_per_domain" to AgentToolParam(
+                "integer",
+                "At most this many results per site, for a more varied list (default: no cap).",
+            ),
+            "fetch_top" to AgentToolParam(
+                "integer",
+                "Also fetch the first N results (0-3, default 0) and append a short main-content excerpt of each. Slower; use it when the snippets will not be enough.",
+            ),
         ),
         required = listOf("tool_title", "query"),
         propertyOrdering = listOf("tool_title", "query", "max_results"),
     )
+
+    /** [T-web-m5] The optional filters of one call, resolved once and handed to every engine. */
+    internal data class SearchOptions(
+        val include: List<String> = emptyList(),
+        val exclude: List<String> = emptyList(),
+        val recency: String? = null,
+        /** Interface language for the scraped engines, see [WebSearchPolicy.searchLanguage]. */
+        val language: String = "en",
+    )
+
+    private class CachedSearch(val results: List<Result>, val engine: String, val notes: List<String>) {
+        fun weight(): Long {
+            var w = 64L
+            for (r in results) w += r.title.length + r.url.length + r.snippet.length
+            return w
+        }
+    }
+
+    /** Same query + same options within ten minutes: answer from memory, spend no quota. */
+    private val searchCache: WebCache<CachedSearch> = WebCache(
+        maxEntries = 48,
+        maxWeight = 400_000L,
+        ttlMs = 10L * 60L * 1000L,
+        sizeOf = { it.weight() },
+    )
+
+    private val cooldown = EngineCooldown()
+
+    /** Test seam: forget cached searches and engine cooldowns. */
+    internal fun resetState() {
+        searchCache.clear()
+        cooldown.reset()
+    }
+
+    internal fun searchCacheKey(
+        engineId: String,
+        allowFallback: Boolean,
+        max: Int,
+        maxPerDomain: Int,
+        options: SearchOptions,
+        query: String,
+    ): String = listOf(
+        engineId,
+        if (allowFallback) "fb" else "nofb",
+        max.toString(),
+        maxPerDomain.toString(),
+        options.include.sorted().joinToString(","),
+        options.exclude.sorted().joinToString(","),
+        options.recency ?: "-",
+        options.language,
+        query.trim().lowercase().replace(Regex("\\s+"), " "),
+    ).joinToString("|")
+
+    private fun stringArg(args: JSONObject, key: String): String =
+        if (!args.has(key) || args.isNull(key)) "" else args.opt(key)?.toString().orEmpty()
 
     fun execute(argsJson: String, context: Context? = null): ToolExecutionResult {
         return try {
@@ -72,65 +159,206 @@ object WebSearchTool {
             if (query.isEmpty()) {
                 return ToolExecutionResult("query is required", success = false, toolTitle = toolTitle)
             }
+            val include = WebSearchPolicy.parseDomainList(stringArg(args, "include_domains"))
+            val exclude = WebSearchPolicy.parseDomainList(stringArg(args, "exclude_domains"))
+            val recency = WebSearchPolicy.normalizeRecency(stringArg(args, "recency"))
+            val maxPerDomain = args.optInt("max_per_domain", 0).coerceIn(0, MAX_RESULTS)
+            val fetchTop = args.optInt("fetch_top", 0).coerceIn(0, MAX_FETCH_TOP)
+            val filtering = include.isNotEmpty() || exclude.isNotEmpty() || maxPerDomain > 0
+            val want = WebSearchPolicy.requestCount(max, filtering)
+            val deviceLanguage = try {
+                java.util.Locale.getDefault().toLanguageTag()
+            } catch (_: Exception) {
+                null
+            }
+            val options = SearchOptions(
+                include = include,
+                exclude = exclude,
+                recency = recency,
+                language = WebSearchPolicy.searchLanguage(query, deviceLanguage),
+            )
+
             val preferred = context?.let { WebSearchSettings.engine(it) } ?: WebSearchSettings.Engine.DDG
             val allowFallback = context?.let { WebSearchSettings.fallbackEnabled(it) } ?: true
-            val engines = mutableListOf(preferred)
-            // A user who picked a no-key engine must not silently spend keyed
-            // quotas when it returns nothing. Keyed fallback only runs after a
-            // KEYED engine was the one they asked for.
-            if (allowFallback && context != null && preferred.needsKey) {
-                for (keyed in WebSearchSettings.configuredKeyed(context)) {
-                    if (keyed != preferred) engines += keyed
-                }
-                if (WebSearchSettings.Engine.DDG !in engines) engines += WebSearchSettings.Engine.DDG
-            }
-            var lastError: String? = null
-            var used = preferred
+            val cacheKey = searchCacheKey(preferred.id, allowFallback, max, maxPerDomain, options, query)
+
             var results: List<Result> = emptyList()
-            for (engine in engines) {
-                used = engine
-                val attempt = search(engine, query, max, context)
-                if (attempt.results.isNotEmpty()) {
-                    results = attempt.results
-                    lastError = null
+            var usedLabel = preferred.id
+            val notes = ArrayList<String>()
+            var cachedAgeMs: Long? = null
+
+            val hit = searchCache.get(cacheKey)
+            if (hit != null) {
+                results = hit.value.results
+                usedLabel = hit.value.engine
+                notes.addAll(hit.value.notes)
+                cachedAgeMs = hit.ageMs
+            } else {
+                // A user who picked a no-key engine must not silently spend keyed
+                // quotas when it returns nothing. Keyed fallback only runs after a
+                // KEYED engine was the one they asked for. The key-less engines
+                // (DuckDuckGo, Bing HTML) follow in both cases.
+                val configured = if (context != null) WebSearchSettings.configuredKeyed(context).map { it.id } else emptyList()
+                val order = WebSearchPolicy.engineOrder(
+                    preferred = preferred.id,
+                    preferredNeedsKey = preferred.needsKey,
+                    configuredKeyed = configured,
+                    allowFallback = allowFallback,
+                    coolingDown = cooldown.cooling(),
+                )
+                val failures = ArrayList<String>()
+                var filteredAway = 0
+                var used: WebSearchSettings.Engine? = null
+                for (engineId in order) {
+                    val engine = WebSearchSettings.Engine.entries.firstOrNull { it.id == engineId } ?: continue
+                    val attempt = search(engine, query, want, context, options)
+                    if (attempt.results.isEmpty()) {
+                        val reason = attempt.error ?: "no results"
+                        failures += "${engine.id}: $reason"
+                        if (!reason.contains("not configured")) cooldown.recordFailure(engine.id)
+                        continue
+                    }
+                    cooldown.recordSuccess(engine.id)
+                    val refined = WebSearchPolicy.refine(attempt.results, include, exclude, maxPerDomain, max)
+                    if (refined.isEmpty()) {
+                        filteredAway += attempt.results.size
+                        failures += "${engine.id}: ${attempt.results.size} results, none matched the domain filters"
+                        continue
+                    }
+                    results = refined
+                    used = engine
                     break
                 }
-                lastError = attempt.error
-            }
-            if (results.isEmpty()) {
-                val fallback = searchNoKeyFallback(query, max, context)
-                if (fallback.isNotEmpty()) {
-                    return ToolExecutionResult(
-                        format(query, fallback, "no-key-fallback"),
-                        success = true,
-                        toolTitle = toolTitle,
+                if (results.isEmpty()) {
+                    val skipBing = WebSearchSettings.Engine.BING_LOCAL.id in order
+                    val fallback = WebSearchPolicy.refine(
+                        searchNoKeyFallback(query, want, context, options, skipBing),
+                        include, exclude, maxPerDomain, max,
                     )
+                    if (fallback.isEmpty()) {
+                        val filterHint = if (filteredAway > 0) {
+                            " $filteredAway results were found but none matched include_domains/exclude_domains — loosen the filters."
+                        } else {
+                            ""
+                        }
+                        return ToolExecutionResult(
+                            "web_search failed for \"$query\" via ${preferred.id}: ${failures.firstOrNull()?.substringAfter(": ") ?: "no results"}. " +
+                                "DuckDuckGo HTML returned no cards, and the no-key Wikipedia/Bing/Mojeek fallback was also empty. " +
+                                "Tried: ${failures.joinToString("; ").take(700)}.$filterHint " +
+                                "Configure Settings → Web search, or open a known URL with browser_use.",
+                            success = false,
+                            toolTitle = toolTitle,
+                        )
+                    }
+                    results = fallback
+                    usedLabel = "no-key-fallback"
+                    if (recency != null) notes += "recency=$recency could not be applied by the fallback engines; results are not time-filtered."
+                } else if (used != null) {
+                    usedLabel = used.id
+                    if (used != preferred) {
+                        val why = failures.firstOrNull { it.startsWith(preferred.id + ":") }?.substringAfter(": ") ?: "no results"
+                        notes += "${preferred.id} did not answer ($why); these results are from ${used.id}."
+                    }
+                    if (recency != null && WebSearchPolicy.recencyToken(used.id, recency) == null) {
+                        notes += "recency=$recency is not supported by ${used.id}; results are not time-filtered."
+                    }
                 }
-                return ToolExecutionResult(
-                    "web_search failed for \"$query\" via ${preferred.id}: ${lastError ?: "no results"}. " +
-                        "DuckDuckGo HTML returned no cards, and the no-key Wikipedia/Bing/Mojeek fallback was also empty. " +
-                        "Configure Settings → Web search, or open a known URL with browser_use.",
-                    success = false,
-                    toolTitle = toolTitle,
-                )
+                searchCache.put(cacheKey, CachedSearch(results, usedLabel, notes.toList()))
             }
-            ToolExecutionResult(format(query, results, used.id), success = true, toolTitle = toolTitle)
+
+            val output = StringBuilder(format(query, results, usedLabel))
+            if (cachedAgeMs != null) notes += "served from the in-memory cache (searched ${cachedAgeMs / 1000}s ago)."
+            if (notes.isNotEmpty()) {
+                output.appendLine()
+                for (note in notes) output.appendLine("Note: $note")
+            }
+            if (fetchTop > 0) output.append(excerptsSection(results, fetchTop))
+            ToolExecutionResult(output.toString(), success = true, toolTitle = toolTitle)
         } catch (e: Exception) {
             ToolExecutionResult("web_search failed: ${e.message}", success = false)
         }
     }
 
+    /**
+     * [T-web-m5] `fetch_top`: read the first [count] results in parallel through
+     * [WebFetchTool.excerpt] — the same SSRF-guarded client as `web_fetch`, never
+     * a third-party reader service — and append a main-content excerpt of each.
+     * The total is budgeted ([EXCERPT_BUDGET_CHARS] shared between the pages) and
+     * the whole step has one deadline; a page that fails or is late is skipped.
+     */
+    private fun excerptsSection(results: List<Result>, count: Int): String {
+        val targets = results.take(count)
+        if (targets.isEmpty()) return ""
+        val share = WebPaging.shareBudget(EXCERPT_BUDGET_CHARS, targets.size)
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(targets.size)
+        val windows = arrayOfNulls<WebPaging.Window>(targets.size)
+        try {
+            val tasks = targets.map { r ->
+                java.util.concurrent.Callable<WebPaging.Window?> {
+                    try {
+                        WebFetchTool.excerpt(r.url, share, EXCERPT_TIMEOUT_SECONDS)
+                    } catch (_: Throwable) {
+                        null
+                    }
+                }
+            }
+            val futures = pool.invokeAll(tasks, EXCERPT_DEADLINE_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
+            futures.forEachIndexed { index, future ->
+                windows[index] = try {
+                    if (future.isCancelled) null else future.get()
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        } catch (_: Exception) {
+            // Interrupted or rejected: return what we have.
+        } finally {
+            pool.shutdownNow()
+        }
+        return buildString {
+            appendLine()
+            appendLine("Excerpts of the first ${targets.size} results (main content as Markdown):")
+            targets.forEachIndexed { index, r ->
+                appendLine()
+                appendLine("[${index + 1}] ${clip(r.title, MAX_TITLE_CHARS)} — ${r.url}")
+                val w = windows[index]
+                if (w == null) {
+                    appendLine("(could not be fetched — try web_fetch on this URL, with render=true if it is a JavaScript app)")
+                } else {
+                    appendLine(w.content.trim())
+                    if (w.hasMore) {
+                        appendLine(
+                            "[excerpt: characters 0–${w.end} of ${w.total} — read on with web_fetch, " +
+                                "this url, format=markdown, offset=${w.end}]",
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     private data class Attempt(val results: List<Result>, val error: String?)
+
+    /** A non-2xx answer from a search backend, kept typed so key rotation can react to it. */
+    internal class SearchHttpException(val code: Int, message: String) : Exception(message)
+
+    private fun scrapeHeaders(options: SearchOptions): Map<String, String> =
+        mapOf("Accept-Language" to WebSearchPolicy.acceptLanguage(options.language))
 
     private fun search(
         engine: WebSearchSettings.Engine,
-        query: String,
+        rawQuery: String,
         max: Int,
         context: Context?,
+        options: SearchOptions = SearchOptions(),
     ): Attempt {
+        // Engines that understand `site:` get the domain filters as operators;
+        // the rest see the plain query and are post-filtered.
+        val query = WebSearchPolicy.queryWithDomains(engine.id, rawQuery, options.include, options.exclude)
+        val recency = WebSearchPolicy.recencyToken(engine.id, options.recency)
         return try {
             when (engine) {
-                WebSearchSettings.Engine.DDG -> searchDuckDuckGo(query, max, context)
+                WebSearchSettings.Engine.DDG -> searchDuckDuckGo(query, max, context, options, recency)
 
                 // [T-android-web-search] Bing's public HTML endpoint: no key, and
                 // the reason "Bing is free" — the paid Web Search API is a
@@ -138,7 +366,8 @@ object WebSearchTool {
                 WebSearchSettings.Engine.BING_LOCAL -> {
                     if (max <= 0) return Attempt(emptyList(), null)
                     val html = fetchUrl(
-                        "https://www.bing.com/search?q=${enc(query)}&setlang=zh-Hans",
+                        "https://www.bing.com/search?q=${enc(query)}&setlang=${enc(options.language)}",
+                        scrapeHeaders(options),
                         context = context,
                     ) ?: return Attempt(emptyList(), "empty response from Bing HTML")
                     val parsed = parseBingHtml(html, max)
@@ -160,7 +389,8 @@ object WebSearchTool {
                         )
                         headers["Authorization"] = "Basic $token"
                     }
-                    val body = fetchUrl("$endpoint?q=${enc(query)}&format=json", headers, context)
+                    val timeRange = if (recency != null) "&time_range=$recency" else ""
+                    val body = fetchUrl("$endpoint?q=${enc(query)}&format=json$timeRange", headers, context)
                         ?: return Attempt(emptyList(), "empty response from SearXNG")
                     val parsed = parseSearxJson(body, max)
                     Attempt(parsed, if (parsed.isEmpty()) "SearXNG returned no results" else null)
@@ -201,14 +431,20 @@ object WebSearchTool {
                     body = JSONObject()
                         .put("query", query)
                         .put("max_results", max)
-                        .put("search_depth", "basic"),
+                        .put("search_depth", "basic")
+                        .also { b ->
+                            if (recency != null) b.put("time_range", recency)
+                            if (options.include.isNotEmpty()) b.put("include_domains", JSONArray(options.include))
+                            if (options.exclude.isNotEmpty()) b.put("exclude_domains", JSONArray(options.exclude))
+                        },
                     keyField = "api_key",
                     max = max,
                 )
 
                 WebSearchSettings.Engine.BING -> keyedGet(
                     engine, context,
-                    url = "${engine.resolvedUrl(context)}?q=${enc(query)}&count=$max",
+                    url = "${engine.resolvedUrl(context)}?q=${enc(query)}&count=$max" +
+                        (if (recency != null) "&freshness=$recency" else ""),
                     headerName = "Ocp-Apim-Subscription-Key",
                     max = max,
                     parse = ::parseBingJson,
@@ -216,7 +452,8 @@ object WebSearchTool {
 
                 WebSearchSettings.Engine.BRAVE -> keyedGet(
                     engine, context,
-                    url = "${engine.resolvedUrl(context)}?q=${enc(query)}&count=$max",
+                    url = "${engine.resolvedUrl(context)}?q=${enc(query)}&count=$max" +
+                        (if (recency != null) "&freshness=$recency" else ""),
                     headerName = "X-Subscription-Token",
                     max = max,
                     parse = { json, n -> parseGenericSearchJson(json, n) },
@@ -228,7 +465,19 @@ object WebSearchTool {
                     body = JSONObject()
                         .put("query", query)
                         .put("numResults", max)
-                        .put("contents", JSONObject().put("text", JSONObject().put("maxCharacters", 400))),
+                        .put("contents", JSONObject().put("text", JSONObject().put("maxCharacters", 400)))
+                        .also { b ->
+                            val window = options.recency
+                            if (window != null) {
+                                b.put("startPublishedDate", WebSearchPolicy.recencyStartIso(window, System.currentTimeMillis()))
+                            }
+                            // Exa accepts one of the two lists per request.
+                            if (options.include.isNotEmpty()) {
+                                b.put("includeDomains", JSONArray(options.include))
+                            } else if (options.exclude.isNotEmpty()) {
+                                b.put("excludeDomains", JSONArray(options.exclude))
+                            }
+                        },
                     headerName = "x-api-key",
                     max = max,
                 )
@@ -338,7 +587,8 @@ object WebSearchTool {
                 WebSearchSettings.Engine.SERPER -> keyedPost(
                     engine, context,
                     url = engine.resolvedUrl(context),
-                    body = JSONObject().put("q", query).put("num", max),
+                    body = JSONObject().put("q", query).put("num", max)
+                        .also { b -> if (recency != null) b.put("tbs", recency) },
                     headerName = "X-API-KEY",
                     max = max,
                 )
@@ -442,6 +692,33 @@ object WebSearchTool {
         }
     }
 
+    /**
+     * [T-web-m5] Run [request] with this engine's next key; when the backend
+     * rejects THAT KEY (401/403) or its quota (429) and the pool has another
+     * one, try the next — the point of a key pool. At most three keys per call.
+     */
+    private fun withKeyRotation(
+        engine: WebSearchSettings.Engine,
+        context: Context?,
+        request: (key: String) -> Attempt,
+    ): Attempt {
+        val poolSize = WebSearchSettings.keys(context, engine).size
+        if (poolSize == 0) return Attempt(emptyList(), "${engine.id} API key is not configured")
+        val attempts = poolSize.coerceAtMost(3)
+        var last: SearchHttpException? = null
+        for (i in 0 until attempts) {
+            val key = SearchKeyRotator.select(context, engine)
+            if (key.isEmpty()) return Attempt(emptyList(), "${engine.id} API key is not configured")
+            try {
+                return request(key)
+            } catch (e: SearchHttpException) {
+                last = e
+                if (e.code != 401 && e.code != 403 && e.code != 429) throw e
+            }
+        }
+        throw last ?: IllegalStateException("${engine.id} request failed")
+    }
+
     private fun keyedGet(
         engine: WebSearchSettings.Engine,
         context: Context?,
@@ -451,16 +728,17 @@ object WebSearchTool {
         parse: (String, Int) -> List<Result>,
         bearer: Boolean = false,
         extra: Map<String, String> = emptyMap(),
-    ): Attempt {
-        val key = SearchKeyRotator.select(context, engine)
-        if (key.isEmpty()) return Attempt(emptyList(), "${engine.id} API key is not configured")
+    ): Attempt = withKeyRotation(engine, context) { key ->
         val headers = linkedMapOf("Accept" to "application/json")
         headers.putAll(extra)
         headers[headerName] = if (bearer && !key.startsWith("Bearer ", ignoreCase = true)) "Bearer $key" else key
         val body = fetchUrl(url, headers, context)
-            ?: return Attempt(emptyList(), "empty response from ${engine.id}")
-        val parsed = parse(body, max)
-        return Attempt(parsed, if (parsed.isEmpty()) "${engine.id} returned no results" else null)
+        if (body == null) {
+            Attempt(emptyList(), "empty response from ${engine.id}")
+        } else {
+            val parsed = parse(body, max)
+            Attempt(parsed, if (parsed.isEmpty()) "${engine.id} returned no results" else null)
+        }
     }
 
     private fun keyedPost(
@@ -473,9 +751,7 @@ object WebSearchTool {
         headerName: String? = null,
         bearer: Boolean = false,
         parse: (String, Int) -> List<Result> = ::parseGenericSearchJson,
-    ): Attempt {
-        val key = SearchKeyRotator.select(context, engine)
-        if (key.isEmpty()) return Attempt(emptyList(), "${engine.id} API key is not configured")
+    ): Attempt = withKeyRotation(engine, context) { key ->
         if (keyField != null) body.put(keyField, key)
         val headers = linkedMapOf(
             "Accept" to "application/json",
@@ -484,9 +760,12 @@ object WebSearchTool {
         if (headerName != null) headers[headerName] = key
         if (bearer) headers["Authorization"] = if (key.startsWith("Bearer ", ignoreCase = true)) key else "Bearer $key"
         val raw = postJson(url, body.toString(), headers, context)
-            ?: return Attempt(emptyList(), "empty response from ${engine.id}")
-        val parsed = parse(raw, max)
-        return Attempt(parsed, if (parsed.isEmpty()) "${engine.id} returned no results" else null)
+        if (raw == null) {
+            Attempt(emptyList(), "empty response from ${engine.id}")
+        } else {
+            val parsed = parse(raw, max)
+            Attempt(parsed, if (parsed.isEmpty()) "${engine.id} returned no results" else null)
+        }
     }
 
     // ── Kelivo provider parsers ─────────────────────────────────────────────
@@ -706,15 +985,30 @@ object WebSearchTool {
         return out
     }
 
-    private fun searchDuckDuckGo(query: String, max: Int, context: Context?): Attempt {
+    private fun searchDuckDuckGo(
+        query: String,
+        max: Int,
+        context: Context?,
+        options: SearchOptions = SearchOptions(),
+        recency: String? = null,
+    ): Attempt {
+        // `df` is DuckDuckGo's date filter (d/w/m/y) on both HTML faces.
+        val df = if (recency != null) "&df=$recency" else ""
         val urls = listOf(
-            "https://html.duckduckgo.com/html/?q=${enc(query)}",
-            "https://lite.duckduckgo.com/lite/?q=${enc(query)}",
+            "https://html.duckduckgo.com/html/?q=${enc(query)}$df",
+            "https://lite.duckduckgo.com/lite/?q=${enc(query)}$df",
         )
         var last = "DuckDuckGo returned no cards"
         var sawBody = false
         for (url in urls) {
-            val html = fetchUrl(url, context = context) ?: continue
+            val html: String? = try {
+                fetchUrl(url, scrapeHeaders(options), context)
+            } catch (e: SearchHttpException) {
+                last = "DuckDuckGo: ${e.message}"
+                sawBody = true
+                null
+            }
+            if (html == null) continue
             sawBody = true
             if (html.contains("anomaly.js") || html.contains("Unfortunately, bots use DuckDuckGo")) {
                 last = "DuckDuckGo blocked this client. Set a backend in Settings → Web search."
@@ -791,10 +1085,17 @@ object WebSearchTool {
         appendLine("web_search ($engine) results for \"$query\" (${results.size}):")
         results.forEachIndexed { i, r ->
             appendLine()
-            appendLine("${i + 1}. ${r.title}")
+            appendLine("${i + 1}. ${clip(r.title, MAX_TITLE_CHARS)}")
             appendLine("   ${r.url}")
-            if (r.snippet.isNotBlank()) appendLine("   ${r.snippet}")
+            // Bounded: some backends return whole page text as the "snippet".
+            if (r.snippet.isNotBlank()) appendLine("   ${clip(r.snippet, MAX_SNIPPET_CHARS)}")
         }
+    }
+
+    /** One line, at most [max] characters, with an ellipsis when cut. */
+    internal fun clip(text: String, max: Int): String {
+        val flat = text.replace(Regex("\\s+"), " ").trim()
+        return if (flat.length <= max) flat else flat.take(max).trimEnd() + "…"
     }
 
     private fun enc(query: String): String =
@@ -805,26 +1106,52 @@ object WebSearchTool {
      * OpenSearch and public HTML engines need no API key, so they run only
      * after every configured engine returned empty.
      */
-    private fun searchNoKeyFallback(query: String, max: Int, context: Context?): List<Result> {
+    private fun searchNoKeyFallback(
+        query: String,
+        max: Int,
+        context: Context?,
+        options: SearchOptions = SearchOptions(),
+        skipBing: Boolean = false,
+    ): List<Result> {
         val out = mutableListOf<Result>()
-        out += searchWikipedia(query, max, context)
-        if (out.size < max) {
-            val bingHtml = fetchUrl("https://www.bing.com/search?q=${enc(query)}&setlang=zh-Hans", context = context)
-            if (bingHtml != null) out += parseBingHtml(bingHtml, max - out.size)
+        // [T-web-m5] Real web engines first, the encyclopedia last: Wikipedia's
+        // title search used to lead this list and pushed actual web results
+        // for the query out of a short page. Each step is isolated — one
+        // engine answering 403 must not cancel the ones after it.
+        if (!skipBing) {
+            try {
+                val bingHtml = fetchUrl(
+                    "https://www.bing.com/search?q=${enc(query)}&setlang=${enc(options.language)}",
+                    scrapeHeaders(options),
+                    context,
+                )
+                if (bingHtml != null) out += parseBingHtml(bingHtml, max)
+            } catch (_: Exception) {
+            }
         }
         if (out.size < max) {
-            out += searchHtmlLinks(
-                "https://www.mojeek.com/search?q=${enc(query)}",
-                max - out.size,
-                context,
-                Regex("""<a[^>]+class="[^"]*title[^"]*"[^>]+href="(https?://[^"]+)"[^>]*>(.*?)</a>""", RegexOption.IGNORE_CASE),
-            )
+            try {
+                out += searchHtmlLinks(
+                    "https://www.mojeek.com/search?q=${enc(query)}",
+                    max - out.size,
+                    context,
+                    Regex("""<a[^>]+class="[^"]*title[^"]*"[^>]+href="(https?://[^"]+)"[^>]*>(.*?)</a>""", RegexOption.IGNORE_CASE),
+                )
+            } catch (_: Exception) {
+            }
+        }
+        if (out.size < max) {
+            try {
+                out += searchWikipedia(query, max - out.size, context, options.language)
+            } catch (_: Exception) {
+            }
         }
         return out.distinctBy { it.url }.take(max)
     }
 
-    private fun searchWikipedia(query: String, max: Int, context: Context?): List<Result> {
-        val host = if (query.any { it.code > 127 }) "zh.wikipedia.org" else "en.wikipedia.org"
+    private fun searchWikipedia(query: String, max: Int, context: Context?, language: String = "en"): List<Result> {
+        if (max <= 0) return emptyList()
+        val host = wikipediaHost(language)
         val url = "https://$host/w/api.php?action=opensearch&search=${enc(query)}&limit=$max&namespace=0&format=json"
         val body = fetchUrl(url, mapOf("Accept" to "application/json"), context) ?: return emptyList()
         return try {
@@ -842,6 +1169,21 @@ object WebSearchTool {
         } catch (_: Exception) {
             emptyList()
         }
+    }
+
+    /**
+     * Wikipedia edition for the search language. It used to be "any non-ASCII
+     * character means Chinese", which sent a Vietnamese or French query to
+     * zh.wikipedia.org.
+     */
+    internal fun wikipediaHost(language: String): String {
+        val lang = language.lowercase()
+        val code = when {
+            lang.startsWith("zh") -> "zh"
+            lang.length in 2..3 && lang.all { it in 'a'..'z' } -> lang
+            else -> lang.substringBefore('-').ifBlank { "en" }
+        }
+        return "$code.wikipedia.org"
     }
 
     private fun searchHtmlLinks(
@@ -877,19 +1219,47 @@ object WebSearchTool {
             Regex("""<h2[^>]*>\s*<a[^>]+href="(https?://[^"]+)"[^>]*>([\s\S]*?)</a>""", RegexOption.IGNORE_CASE),
         )
         for (pattern in patterns) {
-            for (match in pattern.findAll(html)) {
-                val link = match.groupValues.getOrNull(1)?.trim().orEmpty()
-                if (!link.startsWith("http")) continue
+            val matches = pattern.findAll(html).toList()
+            for ((index, match) in matches.withIndex()) {
+                val rawLink = HtmlText.decodeEntities(match.groupValues.getOrNull(1)?.trim().orEmpty())
+                if (!rawLink.startsWith("http")) continue
+                // [T-web-m5] A click tracker hides a real result: unwrap it when
+                // the target can be read, skip it (as before) when it cannot.
+                val link = if (rawLink.contains("bing.com/ck/")) decodeBingTracker(rawLink) ?: continue else rawLink
                 if (link.contains("bing.com/ck/") || link.contains("microsoft.com")) continue
                 val title = stripTags(match.groupValues.getOrNull(2).orEmpty())
                 if (title.isBlank()) continue
                 if (!seen.add(link)) continue
-                out += Result(title, link, "")
+                // [T-web-m5] The caption paragraph between this hit and the next
+                // one is its snippet; the engine used to return titles only.
+                val from = match.range.last + 1
+                val until = if (index + 1 < matches.size) matches[index + 1].range.first else html.length
+                val scopeStart = minOf(from, html.length)
+                val scopeEnd = minOf(until, scopeStart + 3000, html.length).coerceAtLeast(scopeStart)
+                val scope = html.substring(scopeStart, scopeEnd)
+                val snippet = BING_CAPTION.find(scope)?.groupValues?.getOrNull(1)?.let { stripTags(it) }.orEmpty()
+                out += Result(title, link, snippet)
                 if (out.size >= max) return out
             }
             if (out.isNotEmpty()) return out
         }
         return out
+    }
+
+    private val BING_CAPTION = Regex("""<p[^>]*>([\s\S]*?)</p>""", RegexOption.IGNORE_CASE)
+
+    /**
+     * Bing click tracker `…/ck/a?…&u=a1<base64url of the target>` → the target,
+     * or null when the link carries no readable target.
+     */
+    internal fun decodeBingTracker(link: String): String? {
+        val m = Regex("[?&]u=a1([A-Za-z0-9_-]+)").find(link) ?: return null
+        return try {
+            val decoded = String(java.util.Base64.getUrlDecoder().decode(m.groupValues[1]), StandardCharsets.UTF_8)
+            if (decoded.startsWith("http://") || decoded.startsWith("https://")) decoded else null
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /** Shared by the no-key Bing fallback. */
@@ -923,55 +1293,94 @@ object WebSearchTool {
         urlString: String,
         extraHeaders: Map<String, String> = emptyMap(),
         context: Context? = null,
-    ): String? {
-        val url = URL(urlString)
-        val conn = (url.openConnection() as HttpURLConnection).apply {
-            instanceFollowRedirects = true
-            connectTimeout = TIMEOUT_MS
-            readTimeout = TIMEOUT_MS
-            requestMethod = "GET"
-            setRequestProperty("User-Agent", httpUserAgent(context))
-            setRequestProperty("Accept", extraHeaders["Accept"] ?: "text/html,application/xhtml+xml,application/json")
-            setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-            extraHeaders.forEach { (k, v) -> setRequestProperty(k, v) }
-        }
-        return try {
-            val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            stream?.use { inp ->
-                BufferedReader(InputStreamReader(inp, StandardCharsets.UTF_8)).readText()
-            }
-        } finally {
-            conn.disconnect()
-        }
-    }
+    ): String? = exchange("GET", urlString, null, extraHeaders, context)
 
     private fun postJson(
         urlString: String,
         json: String,
         extraHeaders: Map<String, String>,
         context: Context?,
+    ): String? = exchange("POST", urlString, json, extraHeaders, context)
+
+    /**
+     * One request to a search backend.
+     *
+     * [T-web-m5] A non-2xx answer is no longer handed to the parser as if it
+     * were a result page (which turned "HTTP 429" and "HTTP 401" into the
+     * useless "returned no results"): it is thrown as [SearchHttpException]
+     * with the status and the start of the body, after ONE short retry for the
+     * statuses that describe the moment (429/502/503/504).
+     */
+    private fun exchange(
+        method: String,
+        urlString: String,
+        json: String?,
+        extraHeaders: Map<String, String>,
+        context: Context?,
     ): String? {
-        val conn = (URL(urlString).openConnection() as HttpURLConnection).apply {
-            instanceFollowRedirects = true
-            connectTimeout = TIMEOUT_MS
-            readTimeout = TIMEOUT_MS
-            requestMethod = "POST"
-            doOutput = true
-            setRequestProperty("User-Agent", httpUserAgent(context))
-            extraHeaders.forEach { (k, v) -> setRequestProperty(k, v) }
-        }
-        return try {
-            conn.outputStream.use { it.write(json.toByteArray(StandardCharsets.UTF_8)) }
-            val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            stream?.use { inp ->
-                BufferedReader(InputStreamReader(inp, StandardCharsets.UTF_8)).readText()
+        var attempt = 0
+        while (true) {
+            val conn = (URL(urlString).openConnection() as HttpURLConnection).apply {
+                instanceFollowRedirects = true
+                connectTimeout = TIMEOUT_MS
+                readTimeout = TIMEOUT_MS
+                requestMethod = method
+                setRequestProperty("User-Agent", httpUserAgent(context))
+                if (json == null) {
+                    setRequestProperty("Accept", extraHeaders["Accept"] ?: "text/html,application/xhtml+xml,application/json")
+                    setRequestProperty("Accept-Language", extraHeaders["Accept-Language"] ?: "zh-CN,zh;q=0.9,en;q=0.8")
+                } else {
+                    doOutput = true
+                }
+                extraHeaders.forEach { (k, v) -> setRequestProperty(k, v) }
             }
-        } finally {
-            conn.disconnect()
+            try {
+                if (json != null) {
+                    conn.outputStream.use { it.write(json.toByteArray(StandardCharsets.UTF_8)) }
+                }
+                val code = conn.responseCode
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                val body = stream?.use { inp -> readCapped(inp) }
+                if (code in 200..299) return body
+                val retryAfter = conn.getHeaderField("Retry-After")
+                if (attempt == 0 && HttpRetryPolicy.isRetryableStatus(code)) {
+                    val wait = HttpRetryPolicy.delayMs(1, retryAfter)
+                    if (wait != null && wait <= 2_000L) {
+                        attempt = 1
+                        try {
+                            Thread.sleep(wait)
+                        } catch (_: InterruptedException) {
+                            Thread.currentThread().interrupt()
+                            throw SearchHttpException(code, HttpRetryPolicy.describe(code, retryAfter))
+                        }
+                        continue
+                    }
+                }
+                val detail = clip(body.orEmpty(), 160)
+                throw SearchHttpException(
+                    code,
+                    HttpRetryPolicy.describe(code, retryAfter) + if (detail.isNotEmpty()) ": $detail" else "",
+                )
+            } finally {
+                conn.disconnect()
+            }
         }
     }
+
+    /** At most [MAX_RESPONSE_CHARS] of a backend answer: a search page is never larger. */
+    private fun readCapped(input: java.io.InputStream): String {
+        val reader = BufferedReader(InputStreamReader(input, StandardCharsets.UTF_8))
+        val sb = StringBuilder()
+        val buffer = CharArray(8192)
+        while (sb.length < MAX_RESPONSE_CHARS) {
+            val n = reader.read(buffer)
+            if (n < 0) break
+            sb.append(buffer, 0, n)
+        }
+        return sb.toString()
+    }
+
+    private const val MAX_RESPONSE_CHARS = 2_000_000
 
     private fun stripTags(raw: String): String =
         HtmlText.decodeEntities(raw.replace(Regex("<[^>]+>"), " "))
