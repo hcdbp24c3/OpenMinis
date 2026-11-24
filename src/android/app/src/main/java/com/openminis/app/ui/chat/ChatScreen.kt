@@ -1858,6 +1858,41 @@ fun ChatScreen(
         tracedScrollToItem("FAB-UP/turn-walk-top", landIndex, topOffset)
     }
 
+    // [T-chat-progress-rail] Jump straight to one user message (a tap on the
+    // progress rail). Same row lookup and same two-step landing as the
+    // up-button above — resolve the row from the published key map, place it,
+    // read its real height, then rest its top edge under the header — minus
+    // the turn-walking. Instant like that button, not animated: an animated
+    // scroll across many tall rows has to measure every row on the way.
+    val scrollToUserMessage: suspend (String) -> Unit = scrollToUserMessage@{ target ->
+        val visible = listState.layoutInfo.visibleItemsInfo
+        if (visible.isEmpty()) return@scrollToUserMessage
+        val targetKey = "user:$target"
+        val rowMap = flatRowIndexByKey.value
+        val lastFlat = (rowMap.size - 1).coerceAtLeast(0)
+        val leading: Int = visible.firstNotNullOfOrNull { item ->
+            (item.key as? String)
+                ?.let { rowMap[it] }
+                ?.let { flat -> item.index - (lastFlat - flat) }
+        } ?: 0
+        val row: Int = visible.firstOrNull { it.key == targetKey }?.index
+            ?: rowMap[targetKey]?.let { flat -> (lastFlat - flat) + leading }?.takeIf { it >= 0 }
+            ?: return@scrollToUserMessage
+        lastJumpedUserId = target
+        tracedScrollToItem("RAIL/jump", row, 0)
+        val rowSize = listState.layoutInfo.visibleItemsInfo
+            .firstOrNull { it.key == targetKey }?.size ?: 0
+        val topOffset = rowSize - listState.layoutInfo.viewportSize.height +
+            listState.layoutInfo.beforeContentPadding
+        tracedScrollToItem("RAIL/jump-top", row, topOffset)
+    }
+    // Markers for the rail: derived, so a streamed token that leaves the user
+    // messages unchanged notifies nobody.
+    val railMarkerCache = remember(sessionId) { ChatProgressMarkerCache() }
+    val railMarkers = remember(sessionId) {
+        derivedStateOf { railMarkerCache.markers(messages) }
+    }
+
     // [T-android-scroll-fab-reversed] TEMP diagnostic — capture BOTH FABs'
     // gates so we can verify the matrix (bottom=none, middle=both, top=down
     // only) and why the down-FAB is missing at the top. Remove after fix.
@@ -5750,6 +5785,26 @@ fun ChatScreen(
                     val leftover = chatPaneWidthPx.toDp() - CHAT_MAX_CONTENT_WIDTH
                     if (leftover > 0.dp) leftover / 2 else 0.dp
                 }
+
+                // [T-chat-progress-rail] One tick per user message on the right
+                // edge; tap a tick to jump there. Kept clear of the header at
+                // the top and of the two scroll buttons at the bottom. Both
+                // inputs are lambdas so this screen is not recomposed by them.
+                ChatProgressRail(
+                    markers = { railMarkers.value },
+                    rowIndexByKey = { flatRowIndexByKey.value },
+                    listState = listState,
+                    onJump = { id ->
+                        // A browse action, like the up-button: do not let
+                        // streaming pull the viewport back down afterwards.
+                        userScrolledAway = true
+                        coroutineScope.launch { scrollToUserMessage(id) }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(top = 96.dp, bottom = 190.dp, end = fabEndInset)
+                        .fillMaxHeight(),
+                )
 
                 // Scroll-to-bottom FAB (iOS: circle chevron.down, bottom-right)
                 // T138 phase 2 v3: show on user-scroll intent, not transient
