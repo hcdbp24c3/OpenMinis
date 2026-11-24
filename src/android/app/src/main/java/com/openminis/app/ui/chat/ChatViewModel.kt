@@ -3833,7 +3833,10 @@ class ChatViewModel(
             title = "Plan",
             subtitle = "",
         ),
-    )
+    ) + com.openminis.app.agent.CodingCommands.ALL.map { c ->
+        // [T-coding-m5-commands] Prompt commands: a tap fills the message box.
+        SlashCommand(id = c.id, icon = Icons.Outlined.Build, title = c.title, subtitle = c.subtitle)
+    }
 
     // [T-android-split-chat] filteredSlashCommands / updateSlashMenuState /
     // showSlashMenuOverInput / dismissSlashMenu / slashMenuSetSelectedIndex moved
@@ -3910,6 +3913,13 @@ class ChatViewModel(
         savedInputBeforeSlash = null
         _showSlashMenu.value = false
         _slashMenuSelectedIndex.value = -1
+
+        // [T-coding-m5-commands] A prompt command only fills the message box; the
+        // user reads it, edits it if needed, and sends it.
+        com.openminis.app.agent.CodingCommands.composerText(cmd.id, saved)?.let { filled ->
+            _pendingCaret.value = filled.length
+            return filled
+        }
 
         when (cmd.id) {
             "compact" -> compactAll()
@@ -4031,6 +4041,9 @@ class ChatViewModel(
         val name = trimmed.drop(1).lowercase()
         val cmd = availableSlashCommands.firstOrNull { it.title.lowercase() == name }
             ?: return false
+        // [T-coding-m5-commands] A typed "/review" is sent as a message (the
+        // system prompt explains the shortcut); it is not a local action.
+        if (com.openminis.app.agent.CodingCommands.promptFor(cmd.id) != null) return false
         executeSlashCommand(cmd)
         return true
     }
@@ -16609,6 +16622,8 @@ File creation guidelines:
 - Java: install a JDK with `apk add openjdk21-jdk` (openjdk17-jdk / openjdk11-jdk / openjdk8 for older projects). JDK 8's javac needs the `-d` output directory to exist.
 - Background services: each shell_execute runs in an isolated process. When starting a background server (e.g. `python3 -m http.server &`), you MUST redirect stdout/stderr to avoid SIGPIPE when the shell exits: `python3 -m http.server 8765 > /dev/null 2>&1 &`. Without redirection the server dies silently after the command finishes.
 - File search & text scanning: use ripgrep (`rg`) for EVERY scan of files — finding names, keyword/regex search, field extraction, log analysis — on one file or a whole tree. Never use grep/awk/sed/find here, rg is far faster. Contents: `rg -n 'pattern' <dir>` (`-i` ignore case, `-w` whole word, `-F` literal, `-l` file names only, `-t py` or `-g '*.md'` to filter files). File names: `rg --files <dir> -g '*.pdf'`, or `rg --files <dir> | rg 'name'`. rg skips hidden, .gitignored and binary files by default; add `-uuu` to search everything. If `which rg` finds nothing, install it once with `apk add ripgrep`. `**` recursive glob (globstar) is not supported by the shell — use rg instead. When looking for user files, do NOT scan the whole filesystem: search /var/minis/ first (workspace/attachments/shared for the current session, mounts/* for user-provided external folders), and widen the scope only if the file is clearly not there.
+
+${com.openminis.app.agent.CodingPrompt.BASE_SECTION}
 
 Tool call style:
 - Default: do not narrate routine, low-risk tool calls — just call the tool directly.

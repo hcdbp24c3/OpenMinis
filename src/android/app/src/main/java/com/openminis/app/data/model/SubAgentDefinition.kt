@@ -457,12 +457,12 @@ Reporting
          * [BUILT_IN_ID]) gain the new ones instead of losing them forever.
          */
         fun makeBuiltIns(): List<SubAgentDefinition> = listOf(
-            makeBuiltIn(sortOrder = 0).copy(instructions = GENERAL_INSTRUCTIONS),
+            makeBuiltIn(sortOrder = 0).copy(instructions = GENERAL_INSTRUCTIONS + com.openminis.app.agent.CodingPrompt.SUB_AGENT_ENVIRONMENT),
             SubAgentDefinition(
                 id = SCOUT_ID,
                 name = SCOUT_NAME,
                 description = SCOUT_DESCRIPTION,
-                instructions = SCOUT_INSTRUCTIONS,
+                instructions = SCOUT_INSTRUCTIONS + com.openminis.app.agent.CodingPrompt.SUB_AGENT_ENVIRONMENT,
                 isBuiltIn = true,
                 sortOrder = 1,
             ),
@@ -470,7 +470,7 @@ Reporting
                 id = REVIEWER_ID,
                 name = REVIEWER_NAME,
                 description = REVIEWER_DESCRIPTION,
-                instructions = REVIEWER_INSTRUCTIONS,
+                instructions = REVIEWER_INSTRUCTIONS + com.openminis.app.agent.CodingPrompt.SUB_AGENT_ENVIRONMENT,
                 isBuiltIn = true,
                 sortOrder = 2,
             ),
@@ -478,7 +478,7 @@ Reporting
                 id = TESTER_ID,
                 name = TESTER_NAME,
                 description = TESTER_DESCRIPTION,
-                instructions = TESTER_INSTRUCTIONS,
+                instructions = TESTER_INSTRUCTIONS + com.openminis.app.agent.CodingPrompt.SUB_AGENT_ENVIRONMENT,
                 isBuiltIn = true,
                 sortOrder = 3,
             ),
@@ -486,7 +486,7 @@ Reporting
                 id = RESEARCHER_ID,
                 name = RESEARCHER_NAME,
                 description = RESEARCHER_DESCRIPTION,
-                instructions = RESEARCHER_INSTRUCTIONS,
+                instructions = RESEARCHER_INSTRUCTIONS + com.openminis.app.agent.CodingPrompt.SUB_AGENT_ENVIRONMENT,
                 isBuiltIn = true,
                 sortOrder = 4,
             ),
@@ -494,7 +494,7 @@ Reporting
                 id = DEBUGGER_ID,
                 name = DEBUGGER_NAME,
                 description = DEBUGGER_DESCRIPTION,
-                instructions = DEBUGGER_INSTRUCTIONS,
+                instructions = DEBUGGER_INSTRUCTIONS + com.openminis.app.agent.CodingPrompt.SUB_AGENT_ENVIRONMENT,
                 isBuiltIn = true,
                 sortOrder = 5,
             ),
@@ -502,7 +502,7 @@ Reporting
                 id = ARCHITECT_ID,
                 name = ARCHITECT_NAME,
                 description = ARCHITECT_DESCRIPTION,
-                instructions = ARCHITECT_INSTRUCTIONS,
+                instructions = ARCHITECT_INSTRUCTIONS + com.openminis.app.agent.CodingPrompt.SUB_AGENT_ENVIRONMENT,
                 isBuiltIn = true,
                 sortOrder = 6,
             ),
@@ -555,7 +555,15 @@ object SubAgentRoster {
                     log?.invoke("[SubAgents] restoring the built-in's canonical name/description")
                 }
                 spec.copy(
-                    instructions = row.instructions,
+                    // [T-coding-m5-prompt] A row that still holds a default this app
+                    // wrote (none at all, or the brief before the environment notes
+                    // were added) follows the current brief. Anything the user
+                    // edited is theirs and is kept as is.
+                    instructions = if (
+                        row.instructions.isBlank() ||
+                        row.instructions.trim() == spec.instructions
+                            .removeSuffix(com.openminis.app.agent.CodingPrompt.SUB_AGENT_ENVIRONMENT).trim()
+                    ) spec.instructions else row.instructions,
                     modelGroupId = row.modelGroupId,
                     thinkingLevelOverride = row.thinkingLevelOverride,
                     updatedAt = row.updatedAt,
