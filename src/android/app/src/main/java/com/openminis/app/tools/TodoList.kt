@@ -39,7 +39,7 @@ object TodoList {
 
     /**
      * Reads `todos` from the tool arguments. It may arrive as a JSON array or as
-     * a string holding one (the same two shapes ask_user_question accepts), and
+     * a string holding one (the same two shapes user_ask accepts), and
      * an item may be an object or a bare string.
      */
     fun parse(args: JSONObject): Parsed {

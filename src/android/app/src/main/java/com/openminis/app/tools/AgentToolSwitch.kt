@@ -35,21 +35,23 @@ enum class AgentToolSwitch(val key: String, val defaultValue: Boolean) {
      *  On by default: it is the cheap path, and it is SSRF-guarded. */
     WEB_FETCH("agent.tools.webfetch.enabled", true),
 
-    /** [T-android-ask-user] ask_user_question — the tool that stops the run and
-     *  asks the user to choose. On by default: it is the difference between the
-     *  model guessing at a preference and asking for it. */
-    ASK("agent.tools.ask.enabled", true),
-
     /** [T-android-repo-digest] repo_digest — read a GitHub repo as a digest.
      *  On by default: it is the cheap alternative to cloning or browsing. */
     REPO("agent.tools.repo.enabled", true),
 
-    /** [T-port-user-ask] user_ask - on by default, as on iOS (UserAskSettings.defaultEnabled). */
+    /** [T-port-user-ask] user_ask - on by default, as on iOS (UserAskSettings.defaultEnabled).
+     *  [T-ask-merge] The only ask tool: the fork's ask_user_question and its
+     *  switch (agent.tools.ask.enabled) were folded into it, see
+     *  [migrateAskMergeIfNeeded]. */
     USER_ASK(com.openminis.app.agent.userask.UserAskSettingsSpec.ENABLED_KEY, com.openminis.app.agent.userask.UserAskSettingsSpec.DEFAULT_ENABLED),
     ;
 
-    fun isEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(key, defaultValue)
+    fun isEnabled(context: Context): Boolean {
+        // [T-ask-merge] A read that somehow comes before app start still sees
+        // the carried-over value.
+        if (this == USER_ASK) migrateAskMergeIfNeeded(context)
+        return prefs(context).getBoolean(key, defaultValue)
+    }
 
     fun setEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(key, enabled).apply()
@@ -66,9 +68,10 @@ enum class AgentToolSwitch(val key: String, val defaultValue: Boolean) {
             "browser_use" -> BROWSER
             "web_search" -> WEB_SEARCH
             "web_fetch" -> WEB_FETCH
-            // [T-android-ask-user] The alias is the MCP's original name, so a
-            // transcript or a model that learned the MCP spelling still resolves.
-            "ask_user_question", "AskUserQuestion" -> ASK
+            // [T-ask-merge] The removed ask tool's two names: a replayed call
+            // from an older transcript is governed by the surviving switch.
+            com.openminis.app.agent.userask.LegacyAskTool.NAME,
+            com.openminis.app.agent.userask.LegacyAskTool.ALIAS -> USER_ASK
             "repo_digest" -> REPO
             // [T-sub-agents-v1] The renamed tool plus the two names
             // shipped builds wrote, so the switch still governs a
@@ -82,6 +85,40 @@ enum class AgentToolSwitch(val key: String, val defaultValue: Boolean) {
             governing(toolName)?.isEnabled(context) ?: true
 
         // ---------------------------------------------------------------- migration
+
+        /** In-memory latch so the hot read path checks the stored marker once per process. */
+        @Volatile private var askMergeChecked = false
+
+        /**
+         * [T-ask-merge] ask_user_question was folded into user_ask, and so was
+         * its switch. Once: a user who had turned the old switch OFF gets the
+         * merged tool off (the decision is UserAskSwitchMigration.decide, unit
+         * tested). The old key is left in place, unread from then on.
+         */
+        fun migrateAskMergeIfNeeded(context: Context) {
+            if (askMergeChecked) return
+            try {
+                val m = com.openminis.app.agent.userask.UserAskSwitchMigration
+                val p = prefs(context)
+                fun stored(k: String): Boolean? =
+                    if (p.contains(k)) runCatching { p.getBoolean(k, true) }.getOrNull() else null
+                val d = m.decide(
+                    alreadyMigrated = runCatching { p.getBoolean(m.MIGRATED_KEY, false) }.getOrDefault(false),
+                    legacyAskEnabled = stored(m.LEGACY_ENABLED_KEY),
+                    userAskEnabled = stored(USER_ASK.key),
+                )
+                if (d.markMigrated) {
+                    val e = p.edit().putBoolean(m.MIGRATED_KEY, true)
+                    val write: Boolean? = d.writeUserAskEnabled
+                    if (write != null) e.putBoolean(USER_ASK.key, write)
+                    e.apply()
+                }
+                askMergeChecked = true
+            } catch (_: Exception) {
+                // Never let a settings read fail because of the carry-over;
+                // the next read tries again.
+            }
+        }
 
         private const val MIGRATION_KEY = "agent.tools.granular.v1.migrated"
 
@@ -99,6 +136,9 @@ enum class AgentToolSwitch(val key: String, val defaultValue: Boolean) {
          * nothing to carry over for it.
          */
         fun migrateLegacyIfNeeded(context: Context) {
+            // [T-ask-merge] Independent of the granular migration below, so it
+            // goes first: that one returns early once it has run.
+            migrateAskMergeIfNeeded(context)
             val p = prefs(context)
             if (p.getBoolean(MIGRATION_KEY, false)) return
             p.edit().putBoolean(MIGRATION_KEY, true).apply()

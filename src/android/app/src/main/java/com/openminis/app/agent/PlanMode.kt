@@ -30,7 +30,7 @@ object PlanMode {
             "- Work out what needs to change, then present a concrete plan: the files to touch, the change in each, " +
             "and how it will be verified. Do not try to work around the restriction.\n" +
             "- The user turns plan mode off themselves (the chip above the message box, or /plan). " +
-            "If ask_user_question is available, end by asking whether to approve or revise the plan."
+            "If user_ask is available, end by asking with it whether to approve or revise the plan."
 
     private val _version = MutableStateFlow(0)
 
