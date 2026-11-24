@@ -20,7 +20,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,7 +44,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
 import kotlinx.coroutines.channels.Channel
 
 /**
@@ -148,8 +146,6 @@ private val TickEndGap: Dp = 3.dp
 private val TrackWidth: Dp = 19.dp
 private val BubbleGap: Dp = 8.dp
 private val BubbleMaxWidth: Dp = 248.dp
-/** How far under the finger the bubble's bottom edge sits. */
-private val BubbleBelowFinger: Dp = 14.dp
 /** Closest the bubble gets to the top and bottom of the chat area. */
 private val BubbleEdgeMargin: Dp = 8.dp
 
@@ -166,18 +162,20 @@ private val BubbleEdgeMargin: Dp = 8.dp
  *  - PRESS AND HOLD without moving: preview only, no jump on release.
  *  While a finger is down a bubble beside the rail shows the pointed message:
  *  its position ("12/40"), its text and the first line of the reply. It
- *  follows the finger anywhere in the chat area (not only beside the ticks)
- *  and is gone the moment the finger lifts or the gesture is taken away.
+ *  sits beside that message's tick and snaps from tick to tick; it does not
+ *  track the finger, so dragging past either end of the ticks leaves it at
+ *  the first or last one. It is gone the moment the finger lifts or the
+ *  gesture is taken away.
  *
  * A press that turns into a SIDEWAYS swipe is dropped without consuming it,
  * so the system edge-back gesture and horizontal swipes are untouched.
  *
  * Cost: scrolling re-evaluates one `derivedStateOf` (a couple of map lookups
  * and a scan over an IntArray, no allocation) and, only when the highlighted
- * tick actually changes, redraws this one canvas. A drag writes the finger's
- * position to a state read only in the draw and layout phases, so it
- * recomposes nothing; the bubble's content recomposes only when the pointed
- * message changes, and the list is asked to scroll only then too. Jumps go
+ * tick actually changes, redraws this one canvas. A drag recomposes nothing
+ * until the pointed message changes: only then does the bubble's content
+ * recompose, the bubble move (a layout-phase offset) and the list get asked
+ * to scroll. Jumps go
  * through a conflated channel: a fast drag skips the messages the list did
  * not have time to show instead of queueing them up.
  *
@@ -209,19 +207,15 @@ internal fun ChatProgressRail(
     val reply = rememberUpdatedState(replyPreview)
 
     // Where this box sits inside the chat area (its parent layout) and how
-    // tall that area is: the bubble may travel over all of it. Read only in
-    // the bubble's layout-phase offset. -1: not known yet.
+    // tall that area is. The bubble is centred on a tick, so beside the first
+    // or last tick it sticks out of this box; it only has to stay inside the
+    // chat area. Read only in the bubble's layout-phase offset. -1: not known.
     val areaHeight = remember { mutableIntStateOf(-1) }
     val boxTopInArea = remember { mutableIntStateOf(0) }
-    // Whether the bubble is up, for the z-order below. Set by the gesture.
-    val bubbleUp = remember { mutableStateOf(false) }
 
     BoxWithConstraints(
         modifier = modifier
             .width(RailWidth)
-            // Above the chat's other overlays only while the bubble is up, so
-            // the scroll buttons do not cut through it.
-            .zIndex(if (bubbleUp.value) 1f else 0f)
             .onGloballyPositioned { coordinates ->
                 val area = coordinates.parentLayoutCoordinates
                 if (area != null && area.isAttached) {
@@ -269,11 +263,10 @@ internal fun ChatProgressRail(
             }
         }
 
-        // The marker in the bubble (-1: no bubble), whether a finger is on the
-        // rail, and where it is (px from the top of the tick area).
+        // The marker in the bubble (-1: no bubble) and whether a finger is on
+        // the rail.
         val shown = remember(list) { mutableIntStateOf(-1) }
         val holding = remember(list) { mutableStateOf(false) }
-        val fingerY = remember(list) { mutableFloatStateOf(0f) }
         val bubbleHeight = remember { mutableIntStateOf(0) }
 
         // Marker indices to scroll to. Conflated: while the list is still
@@ -305,10 +298,8 @@ internal fun ChatProgressRail(
                         )
                         if (target < 0 || target >= list.size) return@awaitEachGesture
                         down.consume()
-                        fingerY.floatValue = down.position.y
                         shown.intValue = target
                         holding.value = true
-                        bubbleUp.value = true
                         var scrubbing = false
                         var lifted = false
                         var liftedAt = 0L
@@ -341,7 +332,6 @@ internal fun ChatProgressRail(
                                 }
                                 if (scrubbing) {
                                     current.consume()
-                                    fingerY.floatValue = current.position.y
                                     val pointed: Int = ChatProgressRailModel.markerAt(
                                         current.position.y, railPx, list.size, slots,
                                     )
@@ -359,7 +349,6 @@ internal fun ChatProgressRail(
                             // goes at once, with no delay and no fade.
                             holding.value = false
                             shown.intValue = -1
-                            bubbleUp.value = false
                         }
                         if (lifted && !scrubbing) {
                             // A tap jumps; a long still press was a preview.
@@ -412,15 +401,18 @@ internal fun ChatProgressRail(
             }
             val density = LocalDensity.current
             val railTopPx: Int = with(density) { topGap.roundToPx() }
-            val belowPx: Int = with(density) { BubbleBelowFinger.roundToPx() }
+            val railHeightPx: Int = with(density) { railHeight.roundToPx() }
+            // The tick the bubble sits beside. On a condensed rail several
+            // messages share it: the text changes, the bubble stays put.
+            val shownSlot: Int = ChatProgressRailModel.slotOf(shownIndex, list.size, slots)
             val leftPx: Int = with(density) { (RailWidth + BubbleGap).roundToPx() }
             val boxHeightPx: Int = constraints.maxHeight
             val marginPx: Int = with(density) { BubbleEdgeMargin.roundToPx() }
             val shape = RoundedCornerShape(12.dp)
-            // Laid out past the rail's own 24dp (unbounded) and moved with a
-            // layout-phase offset: following the finger recomposes nothing.
-            // It may leave this box (the rail and the clearances around it)
-            // and is only kept inside the chat area, a margin off its edges.
+            // Laid out past the rail's own 24dp (unbounded) and placed with a
+            // layout-phase offset: centred on the pointed message's tick, so
+            // it snaps from tick to tick and never follows the raw finger.
+            // Only nudged to stay inside the chat area, a margin off its edges.
             // Plain Column, not a Surface, so it never swallows touches.
             Column(
                 modifier = Modifier
@@ -435,12 +427,14 @@ internal fun ChatProgressRail(
                                 // Until the chat area is known: this box.
                                 val minTop: Int = if (area < 0) 0 else marginPx - boxTop
                                 val maxBottom: Int = if (area < 0) boxHeightPx else area - boxTop - marginPx
-                                ChatProgressRailModel.bubbleTop(
-                                    railTopPx + fingerY.floatValue,
+                                ChatProgressRailModel.bubbleTopAtSlot(
+                                    shownSlot,
+                                    slots,
+                                    railTopPx,
+                                    railHeightPx,
                                     bubbleHeight.intValue,
                                     minTop,
                                     maxBottom,
-                                    belowPx,
                                 )
                             },
                         )
