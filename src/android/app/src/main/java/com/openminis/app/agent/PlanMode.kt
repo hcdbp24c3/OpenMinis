@@ -29,6 +29,8 @@ object PlanMode {
             "are unavailable and shell_execute only runs read-only commands (anything else is refused).\n" +
             "- Work out what needs to change, then present a concrete plan: the files to touch, the change in each, " +
             "and how it will be verified. Do not try to work around the restriction.\n" +
+            "- Explore before asking: answer from the code whatever the code can answer, and ask the user only about " +
+            "preferences or trade-offs. The plan must be complete enough to follow without further decisions.\n" +
             "- The user turns plan mode off themselves (the chip above the message box, or /plan). " +
             "If user_ask is available, end by asking with it whether to approve or revise the plan."
 
