@@ -36,6 +36,7 @@ import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -125,6 +126,15 @@ fun FileBrowserScreen(
                     }
                 },
                 actions = {
+                    // [T-filebrowser-quick-exit] One tap out from any depth.
+                    // The back arrow still pops one folder at a time; this
+                    // only appears once the user is below the entry folder
+                    // (at the entry folder the arrow already closes).
+                    if (state.canGoBack) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.Filled.Close, contentDescription = "Close file browser")
+                        }
+                    }
                     // T-hidden-files a3e7f1d0: trailing toolbar collapsed
                     // to a single ⋯ menu (was a Sort-only IconButton). All
                     // functional actions now live under one entry point.
