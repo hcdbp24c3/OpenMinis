@@ -164,6 +164,9 @@ class OAuthCallbackServer(
     }
 
     private var serverSocket: ServerSocket? = null
+    // [fork: oauth-restart-race] Guards serverSocket: a bind and stop()'s
+    // close never interleave, so a stop() always ends the thread it stopped.
+    private val socketLock = Any()
     @Volatile private var running = false
 
     /** Set by the first of success / error / stop; everything later is a no-op. */
@@ -226,12 +229,21 @@ class OAuthCallbackServer(
         keepAlive.getAndSet(token)
             ?.let { com.openminis.app.service.OAuthWaitKeepAlive.end(it, "restarted port=$port") }
         Thread {
+            // [fork: oauth-restart-race] This thread's own socket. Reading the
+            // shared field let a thread that stop() had already ended bind the
+            // port afterwards (or accept on a later start()'s socket): the
+            // port stayed taken, so the next start() failed its bind.
+            var own: ServerSocket? = null
             try {
                 val portsToTry = listOf(port) + fallbackPorts
                 var bound = false
                 for (p in portsToTry) {
                     try {
-                        serverSocket = ServerSocket(p)
+                        synchronized(socketLock) {
+                            // Stopped or restarted before the bind: not ours to open.
+                            if (keepAlive.get() != token) return@Thread
+                            own = ServerSocket(p).also { serverSocket = it }
+                        }
                         boundPort = p
                         bound = true
                         break
@@ -249,7 +261,7 @@ class OAuthCallbackServer(
                 served.remove(boundPort)
                 listening[boundPort] = this
                 while (running) {
-                    val socket = serverSocket?.accept() ?: break
+                    val socket = own?.accept() ?: break
                     try {
                         val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
                         val requestLine = reader.readLine() ?: continue
@@ -341,7 +353,8 @@ class OAuthCallbackServer(
             } catch (e: Exception) {
                 if (running) Log.e(TAG, "Server error", e)
             } finally {
-                listening.remove(boundPort, this)
+                try { own?.close() } catch (_: Exception) {}
+                if (own != null) listening.remove(boundPort, this)
                 // Nothing is listening any more, whichever way the loop ended.
                 releaseKeepAlive("server-exit", token)
             }
@@ -351,8 +364,10 @@ class OAuthCallbackServer(
     fun stop() {
         releaseKeepAlive("stopped")
         running = false
-        try { serverSocket?.close() } catch (_: Exception) {}
-        serverSocket = null
+        synchronized(socketLock) {
+            try { serverSocket?.close() } catch (_: Exception) {}
+            serverSocket = null
+        }
         // Notify external callers (e.g. XAIOAuthManager) so they can
         // cancel an in-flight suspendCancellableCoroutine instead of
         // hanging until the next inbound connection / the 5-min
