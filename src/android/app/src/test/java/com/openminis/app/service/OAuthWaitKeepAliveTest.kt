@@ -137,8 +137,9 @@ class OAuthWaitKeepAliveTest {
     @Test
     fun `two flows at once - one ending leaves the other protected`() {
         val base = OAuthWaitKeepAlive.active.value
-        val pa = freePort()
-        val pb = freePort()
+        // [fork] Both held open while picking: two freePort() calls in a row
+        // can return the same port, and then one server fails its bind.
+        val (pa, pb) = ServerSocket(0).use { x -> ServerSocket(0).use { y -> x.localPort to y.localPort } }
         val a = server(pa).also { it.start() }
         val b = server(pb).also { it.start() }
         get(pb, "/favicon.ico")
