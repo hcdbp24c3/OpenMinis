@@ -51,6 +51,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.key
 import sh.calvin.reorderable.ReorderableColumn
 import com.openminis.app.data.model.ProviderInstance
+import com.openminis.app.data.repository.ModelAbsenceGrace
 import com.openminis.app.data.repository.ProviderRepository
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Delete
@@ -76,6 +77,9 @@ fun ProviderListScreen(
     val context = LocalContext.current
 
     var showMenu by remember { mutableStateOf(false) }
+    var graceDays by remember { mutableStateOf(ModelAbsenceGrace.days(context)) }
+    var showGraceDialog by remember { mutableStateOf(false) }
+    var graceText by remember { mutableStateOf("") }
     // [T-android-swipe-row-actions] Pending swipe-delete target. Held here
     // rather than per-row so the confirmation survives the row being
     // recomposed/reordered underneath it.
@@ -329,7 +333,65 @@ fun ProviderListScreen(
                 }
             }
         }
+        // [T-model-absence-grace-days]
+        SettingsSection(
+            header = "Model list",
+            footer = "Models a provider stops listing are kept as unavailable for this many " +
+                "days before they are removed. 0 removes them right away. " +
+                "Models you added by hand are never removed.",
+        ) {
+            SettingsValueRow(
+                title = "Keep unlisted models for",
+                value = ModelAbsenceGrace.label(graceDays),
+                onClick = {
+                    graceText = graceDays.toString()
+                    showGraceDialog = true
+                },
+                showDivider = false,
+            )
+        }
         Spacer(Modifier.height(80.dp))
+    }
+
+    // [T-model-absence-grace-days] Strings are literals for now.
+    if (showGraceDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showGraceDialog = false },
+            title = { Text("Keep unlisted models for") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = graceText,
+                        onValueChange = { v -> graceText = v.filter { it in '0'..'9' }.take(3) },
+                        singleLine = true,
+                        label = { Text("Days (0-${ModelAbsenceGrace.MAX_DAYS})") },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                        ),
+                    )
+                    Text(
+                        text = "0 removes a model on the first refresh that no longer lists it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    enabled = ModelAbsenceGrace.parseDays(graceText) != null,
+                    onClick = {
+                        ModelAbsenceGrace.parseDays(graceText)?.let { d ->
+                            graceDays = d
+                            ModelAbsenceGrace.set(context, d)
+                        }
+                        showGraceDialog = false
+                    },
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { showGraceDialog = false }) { Text("Cancel") }
+            },
+        )
     }
 
     if (showMenu) {

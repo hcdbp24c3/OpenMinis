@@ -1359,6 +1359,10 @@ class ProviderRepository(private val context: Context) {
         // user overrides actually live. Excludes both of those sets so an entry
         // is never added twice.
         val nowMs = System.currentTimeMillis()
+        // [T-model-absence-grace-days] The window is the user's setting
+        // (default = MODEL_ABSENCE_GRACE_MS, 0 = drop on the first miss).
+        // Cached after the first read, so no I/O here under configLock.
+        val graceDays = ModelAbsenceGrace.days(context)
         val absentCatalog = existing.filter { e ->
             !e.isCustom &&
                 e.baseModel.id !in refreshedModelIds &&
@@ -1368,7 +1372,7 @@ class ProviderRepository(private val context: Context) {
         val expiredAbsent = mutableListOf<ModelEntry>()
         for (entry in absentCatalog) {
             val since = entry.absentSince ?: nowMs
-            if (nowMs - since > MODEL_ABSENCE_GRACE_MS) {
+            if (ModelAbsenceGrace.shouldDrop(entry.absentSince, nowMs, graceDays)) {
                 expiredAbsent.add(entry)
             } else {
                 // First miss stamps the clock; later misses keep it, so the
@@ -1380,7 +1384,7 @@ class ProviderRepository(private val context: Context) {
             android.util.Log.i(
                 "ProviderRepo",
                 "[ModelList] replaceEntries kept ${keptAbsent.size} unlisted catalog entr(ies) within the " +
-                    "${MODEL_ABSENCE_GRACE_MS / 3_600_000}h grace window: ${keptAbsent.map { it.baseModel.id }.take(10)}",
+                    "${ModelAbsenceGrace.graceMs(graceDays) / 3_600_000}h grace window: ${keptAbsent.map { it.baseModel.id }.take(10)}",
             )
         }
         if (expiredAbsent.isNotEmpty()) {
