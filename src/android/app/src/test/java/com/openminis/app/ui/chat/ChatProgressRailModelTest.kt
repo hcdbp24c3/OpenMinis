@@ -232,16 +232,41 @@ class ChatProgressRailModelTest {
     }
 
     @Test
-    fun bubbleSitsAboveTheFingerAndStaysInsideTheBox() {
+    fun bubbleSitsAboveTheFingerAndStaysInsideTheBounds() {
         // Bottom edge 10px under the finger.
-        assertEquals(210, m.bubbleTop(300f, 100, 1000, 10))
-        // Near the top: pinned to the top edge.
-        assertEquals(0, m.bubbleTop(20f, 100, 1000, 10))
-        // Near the bottom: pinned to the bottom edge.
-        assertEquals(900, m.bubbleTop(995f, 100, 1000, 10))
-        // A bubble taller than the box, or not measured yet.
-        assertEquals(0, m.bubbleTop(300f, 2000, 1000, 10))
-        assertEquals(310, m.bubbleTop(300f, 0, 1000, 10))
+        assertEquals(210, m.bubbleTop(300f, 100, 0, 1000, 10))
+        // Near the top: pinned to the top bound.
+        assertEquals(0, m.bubbleTop(20f, 100, 0, 1000, 10))
+        // Near the bottom: pinned to the bottom bound.
+        assertEquals(900, m.bubbleTop(995f, 100, 0, 1000, 10))
+        // A bubble taller than the bounds, or not measured yet.
+        assertEquals(0, m.bubbleTop(300f, 2000, 0, 1000, 10))
+        assertEquals(310, m.bubbleTop(300f, 0, 0, 1000, 10))
+    }
+
+    @Test
+    fun bubbleFollowsTheFingerPastTheRailUpToTheChatArea() {
+        // Chat area from 250px above the rail's box to 1500px below its top.
+        // Finger above the box: the bubble goes up with it.
+        assertEquals(-190, m.bubbleTop(-100f, 100, -250, 1500, 10))
+        // ...until the top of the chat area.
+        assertEquals(-250, m.bubbleTop(-400f, 100, -250, 1500, 10))
+        // Finger below the box (1000px tall): the bubble goes down with it.
+        assertEquals(1110, m.bubbleTop(1200f, 100, -250, 1500, 10))
+        // ...until the bottom of the chat area.
+        assertEquals(1400, m.bubbleTop(1495f, 100, -250, 1500, 10))
+        assertEquals(1400, m.bubbleTop(5000f, 100, -250, 1500, 10))
+        // Inside the box nothing changes.
+        assertEquals(210, m.bubbleTop(300f, 100, -250, 1500, 10))
+    }
+
+    @Test
+    fun bubbleTallerThanTheChatAreaIsPinnedToItsTop() {
+        assertEquals(-250, m.bubbleTop(300f, 2000, -250, 1500, 10))
+        assertEquals(-250, m.bubbleTop(300f, 1750, -250, 1500, 10))
+        // Empty or inverted bounds never throw.
+        assertEquals(40, m.bubbleTop(300f, 100, 40, 40, 10))
+        assertEquals(40, m.bubbleTop(300f, 100, 40, 0, 10))
     }
 
     @Test
@@ -282,5 +307,19 @@ class ChatProgressRailModelTest {
         assertTrue(consume > notOurs)
         // The bubble is not a Surface (a Surface swallows touches under it).
         assertTrue(!rail.contains("Surface("))
+    }
+
+    @Test
+    fun theBubbleGoesTheMomentTheFingerLifts() {
+        val rail: String = ProductionSources.read("ui/chat/ChatProgressRailUi.kt")
+        // No linger timer after release.
+        assertTrue(!rail.contains("PREVIEW_MS"))
+        assertTrue(!rail.contains("delay("))
+        // Every way out of the gesture clears the bubble.
+        val cleanup: Int = rail.indexOf("} finally {")
+        assertTrue(cleanup >= 0)
+        val cleared: Int = rail.indexOf("shown.intValue = -1", cleanup)
+        assertTrue(cleared > cleanup)
+        assertEquals(cleared, rail.lastIndexOf("shown.intValue = -1"))
     }
 }

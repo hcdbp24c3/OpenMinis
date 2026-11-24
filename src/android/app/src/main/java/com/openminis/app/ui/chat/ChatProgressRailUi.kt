@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -44,8 +45,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
 
 /**
  * [T-chat-progress-rail] Builds the rail's markers from the message list and
@@ -149,8 +150,8 @@ private val BubbleGap: Dp = 8.dp
 private val BubbleMaxWidth: Dp = 248.dp
 /** How far under the finger the bubble's bottom edge sits. */
 private val BubbleBelowFinger: Dp = 14.dp
-/** How long the bubble stays after the finger lifts. */
-private const val PREVIEW_MS = 1_200L
+/** Closest the bubble gets to the top and bottom of the chat area. */
+private val BubbleEdgeMargin: Dp = 8.dp
 
 /**
  * [T-chat-progress-rail] One tick per user message on the chat's right edge.
@@ -165,7 +166,8 @@ private const val PREVIEW_MS = 1_200L
  *  - PRESS AND HOLD without moving: preview only, no jump on release.
  *  While a finger is down a bubble beside the rail shows the pointed message:
  *  its position ("12/40"), its text and the first line of the reply. It
- *  follows the finger and fades out [PREVIEW_MS] after release.
+ *  follows the finger anywhere in the chat area (not only beside the ticks)
+ *  and is gone the moment the finger lifts or the gesture is taken away.
  *
  * A press that turns into a SIDEWAYS swipe is dropped without consuming it,
  * so the system edge-back gesture and horizontal swipes are untouched.
@@ -206,7 +208,30 @@ internal fun ChatProgressRail(
     val jump = rememberUpdatedState(onJump)
     val reply = rememberUpdatedState(replyPreview)
 
-    BoxWithConstraints(modifier = modifier.width(RailWidth)) {
+    // Where this box sits inside the chat area (its parent layout) and how
+    // tall that area is: the bubble may travel over all of it. Read only in
+    // the bubble's layout-phase offset. -1: not known yet.
+    val areaHeight = remember { mutableIntStateOf(-1) }
+    val boxTopInArea = remember { mutableIntStateOf(0) }
+    // Whether the bubble is up, for the z-order below. Set by the gesture.
+    val bubbleUp = remember { mutableStateOf(false) }
+
+    BoxWithConstraints(
+        modifier = modifier
+            .width(RailWidth)
+            // Above the chat's other overlays only while the bubble is up, so
+            // the scroll buttons do not cut through it.
+            .zIndex(if (bubbleUp.value) 1f else 0f)
+            .onGloballyPositioned { coordinates ->
+                val area = coordinates.parentLayoutCoordinates
+                if (area != null && area.isAttached) {
+                    areaHeight.intValue = area.size.height
+                    boxTopInArea.intValue = area.localPositionOf(coordinates, Offset.Zero).y.toInt()
+                } else {
+                    areaHeight.intValue = -1
+                }
+            },
+    ) {
         val room: Int = (maxHeight.value / SlotHeight.value).toInt()
         val slots: Int = ChatProgressRailModel.slotCount(list.size, room)
         if (slots <= 0) return@BoxWithConstraints
@@ -259,14 +284,7 @@ internal fun ChatProgressRail(
                 if (index >= 0 && index < list.size) jump.value(list[index].messageId)
             }
         }
-        val isHolding: Boolean = holding.value
         val shownIndex: Int = shown.intValue
-        LaunchedEffect(isHolding, shownIndex) {
-            if (!isHolding && shownIndex >= 0) {
-                delay(PREVIEW_MS)
-                shown.intValue = -1
-            }
-        }
 
         val railHeight: Dp = SlotHeight * slots
         val topGap: Dp = (maxHeight - railHeight) / 2
@@ -290,6 +308,7 @@ internal fun ChatProgressRail(
                         fingerY.floatValue = down.position.y
                         shown.intValue = target
                         holding.value = true
+                        bubbleUp.value = true
                         var scrubbing = false
                         var lifted = false
                         var liftedAt = 0L
@@ -335,9 +354,12 @@ internal fun ChatProgressRail(
                                 }
                             }
                         } finally {
-                            // Also reached when the system takes the gesture
-                            // away (edge-back): the bubble then times out.
+                            // Finger up, a sideways swipe, or the system
+                            // taking the gesture away (edge-back): the bubble
+                            // goes at once, with no delay and no fade.
                             holding.value = false
+                            shown.intValue = -1
+                            bubbleUp.value = false
                         }
                         if (lifted && !scrubbing) {
                             // A tap jumps; a long still press was a preview.
@@ -345,14 +367,8 @@ internal fun ChatProgressRail(
                                 val tapped: Int = ChatProgressRailModel.tapTargetAt(
                                     target, list.size, slots, active.value,
                                 )
-                                if (tapped >= 0 && tapped < list.size) {
-                                    shown.intValue = tapped
-                                    jumps.trySend(tapped)
-                                }
+                                if (tapped >= 0 && tapped < list.size) jumps.trySend(tapped)
                             }
-                        } else if (!lifted && !scrubbing) {
-                            // Turned into a sideways swipe: get out of its way.
-                            shown.intValue = -1
                         }
                     }
                 },
@@ -399,9 +415,12 @@ internal fun ChatProgressRail(
             val belowPx: Int = with(density) { BubbleBelowFinger.roundToPx() }
             val leftPx: Int = with(density) { (RailWidth + BubbleGap).roundToPx() }
             val boxHeightPx: Int = constraints.maxHeight
+            val marginPx: Int = with(density) { BubbleEdgeMargin.roundToPx() }
             val shape = RoundedCornerShape(12.dp)
             // Laid out past the rail's own 24dp (unbounded) and moved with a
             // layout-phase offset: following the finger recomposes nothing.
+            // It may leave this box (the rail and the clearances around it)
+            // and is only kept inside the chat area, a margin off its edges.
             // Plain Column, not a Surface, so it never swallows touches.
             Column(
                 modifier = Modifier
@@ -410,12 +429,20 @@ internal fun ChatProgressRail(
                     .offset {
                         IntOffset(
                             x = -leftPx,
-                            y = ChatProgressRailModel.bubbleTop(
-                                railTopPx + fingerY.floatValue,
-                                bubbleHeight.intValue,
-                                boxHeightPx,
-                                belowPx,
-                            ),
+                            y = run {
+                                val area: Int = areaHeight.intValue
+                                val boxTop: Int = boxTopInArea.intValue
+                                // Until the chat area is known: this box.
+                                val minTop: Int = if (area < 0) 0 else marginPx - boxTop
+                                val maxBottom: Int = if (area < 0) boxHeightPx else area - boxTop - marginPx
+                                ChatProgressRailModel.bubbleTop(
+                                    railTopPx + fingerY.floatValue,
+                                    bubbleHeight.intValue,
+                                    minTop,
+                                    maxBottom,
+                                    belowPx,
+                                )
+                            },
                         )
                     }
                     .onSizeChanged { bubbleHeight.intValue = it.height }

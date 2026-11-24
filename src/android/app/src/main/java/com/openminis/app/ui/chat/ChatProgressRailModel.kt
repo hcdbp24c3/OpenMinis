@@ -216,17 +216,21 @@ internal object ChatProgressRailModel {
     }
 
     /**
-     * Top edge of the preview bubble, in px inside a box [boxHeight] tall.
+     * Top edge of the preview bubble, in px, in the same coordinates as
+     * [fingerY], [minTop] and [maxBottom].
      *
      * The bubble sits mostly ABOVE the finger (its bottom edge [below] px
-     * under it) so the thumb does not cover the text, and is kept inside the
-     * box at both ends.
+     * under it) so the thumb does not cover the text. It follows the finger
+     * freely, also past the ends of the rail, and is only kept between
+     * [minTop] and [maxBottom]: the visible chat area, which may start above
+     * the rail's own box ([minTop] negative) and end below it. A bubble
+     * taller than that span is pinned to [minTop].
      */
-    fun bubbleTop(fingerY: Float, bubbleHeight: Int, boxHeight: Int, below: Int): Int {
+    fun bubbleTop(fingerY: Float, bubbleHeight: Int, minTop: Int, maxBottom: Int, below: Int): Int {
         val wanted = (fingerY + below - bubbleHeight).toInt()
-        val max = boxHeight - bubbleHeight
-        if (max <= 0) return 0
-        return wanted.coerceIn(0, max)
+        val maxTop = maxBottom - bubbleHeight
+        if (maxTop <= minTop) return minTop
+        return wanted.coerceIn(minTop, maxTop)
     }
 
     /**
